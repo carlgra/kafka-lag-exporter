@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kafka-lag-exporter.fullname" . }}
+  labels:
+    {{- include "kafka-lag-exporter.labels" . | nindent 4 }}
+    {{- if .Values.deploymentExtraLabels }}
+    {{- tpl (toYaml .Values.deploymentExtraLabels) . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kafka-lag-exporter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kafka-lag-exporter.labels" . | nindent 8 }}
+        {{- if .Values.podExtraLabels }}
+        {{- tpl (toYaml .Values.podExtraLabels) . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/030-ConfigMap.yaml") . | sha256sum }}
+        {{- if .Values.podAnnotations }}
+        {{- tpl (toYaml .Values.podAnnotations) . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.hostAliases }}
+      hostAliases:
+{{ toYaml .Values.hostAliases | indent 8 }}
+      {{- end }}
+      {{- if or .Values.watchers.strimzi .Values.serviceAccount.create }}
+      {{- if .Values.serviceAccount.nameOverride }}
+      serviceAccountName: {{ .Values.serviceAccount.nameOverride }}
+      {{- else }}
+      serviceAccountName: {{ include "kafka-lag-exporter.fullname" . }}-serviceaccount
+      {{- end }}
+      {{- end }}
+      {{- if .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{ toYaml .Values.image.pullSecrets | indent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.env }}
+          env:
+{{ toYaml .Values.env | indent 10 }}
+          {{- end }}
+          {{- if .Values.envFromConfigMapRefs }}
+          envFrom:
+            {{- range .Values.envFromConfigMapRefs }}
+            - configMapRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.envFromSecretRefs }}
+          envFrom:
+            {{- range .Values.envFromSecretRefs }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- if .Values.securityContext }}
+          securityContext:
+{{ toYaml .Values.securityContext | indent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbeInitialDelay }}
+            periodSeconds: {{ .Values.livenessProbePeriodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbeTimeout }}
+            failureThreshold: {{ .Values.livenessProbeFailureThreshold }}
+            successThreshold: {{ .Values.livenessProbeSuccessThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbeInitialDelay }}
+            periodSeconds: {{ .Values.readinessProbePeriodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbeTimeout }}
+            failureThreshold: {{ .Values.readinessProbeFailureThreshold }}
+            successThreshold: {{ .Values.readinessProbeSuccessThreshold }}
+          args:
+            - "--config"
+            - "/etc/kafka-lag-exporter/config.yaml"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/kafka-lag-exporter/
+          {{- if .Values.secrets }}
+            - mountPath: /opt/kafka-lag-exporter/secrets/
+              name: {{ .Values.secrets.name }}
+          {{- end }}
+          {{- range .Values.extraConfigmapMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              subPath: {{ .subPath }}
+              readOnly: {{ .readOnly }}
+          {{- end }}
+          {{- range .Values.extraMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- with .Values.initContainers }}
+      initContainers: {{ toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "kafka-lag-exporter.fullname" . }}-configmap
+      {{- if .Values.secrets }}
+        - name: {{ .Values.secrets.name }}
+          secret:
+            secretName: {{ .Values.secrets.name }}
+      {{- end }}
+      {{- range .Values.extraConfigmapMounts }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+      {{- end }}
+      {{- range .Values.extraMounts }}
+        - name: {{ .name }}
+{{ toYaml .mount | indent 10 }}
+      {{- end }}

@@ -1,0 +1,39 @@
+{{- if .Values.prometheus.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kafka-lag-exporter.fullname" . }}
+  {{- if .Values.prometheus.serviceMonitor.namespace }}
+  namespace: {{ .Values.prometheus.serviceMonitor.namespace }}
+  {{- end }}
+  labels:
+    {{- include "kafka-lag-exporter.labels" . | nindent 4 }}
+    {{- if .Values.prometheus.serviceMonitor.additionalLabels }}
+{{ toYaml .Values.prometheus.serviceMonitor.additionalLabels | indent 4 -}}
+    {{- end }}
+spec:
+  jobLabel: jobLabel
+  selector:
+    matchLabels:
+      {{- include "kafka-lag-exporter.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+    - {{ .Release.Namespace }}
+  endpoints:
+  - port: http
+    interval: {{ .Values.prometheus.serviceMonitor.interval }}
+    {{- if .Values.prometheus.serviceMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ .Values.prometheus.serviceMonitor.scrapeTimeout }}
+    {{- end }}
+    {{- with .Values.prometheus.serviceMonitor.metricRelabelings }}
+    metricRelabelings:
+    {{- tpl (toYaml . | nindent 6) $ }}
+    {{- end }}
+    {{- with .Values.prometheus.serviceMonitor.relabelings }}
+    relabelings:
+    {{- tpl (toYaml . | nindent 6) $ }}
+    {{- end }}
+  {{- if .Values.prometheus.serviceMonitor.additionalConfig }}
+{{ toYaml .Values.prometheus.serviceMonitor.additionalConfig | indent 2}}
+  {{- end }}
+{{- end }}

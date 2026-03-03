@@ -1,0 +1,58 @@
+pollIntervalSeconds: 30
+clientGroupId: "kafkalagexporter"
+kafkaClientTimeoutSeconds: 10
+kafkaRetries: 0
+logLevel: "INFO"
+
+metricWhitelist:
+  - ".*"
+
+clusters: []
+  # - name: "my-cluster"
+  #   bootstrapBrokers: "localhost:9092"
+  #   groupWhitelist:
+  #     - ".*"
+  #   groupBlacklist: []
+  #   topicWhitelist:
+  #     - ".*"
+  #   topicBlacklist: []
+  #   labels:
+  #     env: "production"
+
+lookup:
+  memory:
+    size: 60
+  redis:
+    enabled: false
+    host: "localhost"
+    port: 6379
+    database: 0
+    timeout: 60
+    prefix: "kafka-lag-exporter"
+    separator: ":"
+    retention: "1d"
+    expiration: "1d"
+    tls: false
+
+sinks:
+  prometheus:
+    enabled: true
+    port: 8000
+    bindAddress: ""
+  graphite:
+    enabled: false
+    host: "localhost"
+    port: 2003
+    prefix: ""
+    tls: false
+  influxdb:
+    enabled: false
+    endpoint: "http://localhost"
+    port: 8086
+    database: "kafka_lag_exporter"
+    username: ""
+    password: ""
+    async: true
+
+watchers:
+  strimzi: false

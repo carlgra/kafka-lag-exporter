@@ -1,0 +1,195 @@
+## Statically define one or more cluster
+clusters: {}
+## Ex)
+#clusters:
+#  - name: "default"
+#    bootstrapBrokers: "simple-strimzi-kafka-bootstrap.strimzi.svc.cluster.local:9092"
+#    topicWhitelist:
+#    - "^xyz-corp-topics\\..+"
+#    topicBlacklist:
+#    - "^unmonitored-topics-.+"
+#    groupWhitelist:
+#    - "^analytics-app-.+"
+#    groupBlacklist:
+#    - "^unmonitored-groups-.+"
+#    consumerProperties:
+#      security.protocol: SSL
+#    adminClientProperties:
+#      security.protocol: SSL
+#    labels:
+#      location: ny
+#      zone: "us-east"
+
+# Lookup Table
+lookup:
+  memory:
+    ## Size of the sliding window of offsets to keep in each partition's lookup table
+    size: 60
+  redis:
+    enabled: false
+    # host: localhost
+    # database: 0
+    # port: 6379
+    # timeout: 60
+    # prefix: kafka-lag-exporter
+    # separator: ":"
+    # retention: 1d
+    # expiration: 7d
+    # tls: false
+
+## The interval between refreshing metrics
+pollIntervalSeconds: 30
+## The Consumer Group `group.id` to use when connecting to Kafka
+clientGroupId: "kafkalagexporter"
+## The timeout when communicating with Kafka clusters
+kafkaClientTimeoutSeconds: 10
+## The number of retry when getting the consumer groups
+kafkaRetries: 2
+## Sinks for metric reporting (replaces reporters)
+sinks:
+  prometheus:
+    ## Flag to enable the Prometheus metrics reporter
+    enabled: true
+    ## The port to run the Prometheus endpoint on
+    port: 8000
+    ## Bind address for the Prometheus HTTP server. Empty string binds to all interfaces.
+    ## Set to "127.0.0.1" to restrict to localhost only.
+    bindAddress: ""
+  graphite:
+    ## Flag to enable the graphite metrics reporter
+    enabled: false
+    ## The graphite host to send metrics to
+    host: "localhost"
+    ## The graphite port to send metrics to
+    port: 2003
+    ## The graphite metric prefix
+    prefix: ""
+    ## Enable TLS for Graphite connections
+    tls: false
+  influxdb:
+    ## Flag to enable the influxdb metrics reporter
+    enabled: false
+    ## The influxdb host to send metrics to
+    endpoint: "http://influxdb"
+    ## The influxdb port to send metrics to
+    port: 8086
+    ## The influxdb database to send metrics to
+    database: "kafka_lag_exporter"
+    ## The influxdb username to connect
+    username: ""
+    ## The influxdb password to connect
+    password: ""
+    ## Flag to enable influxdb async non-blocking write mode to send metrics
+    async: true
+## Watchers will automatically discover and forget Kafka clusters
+watchers:
+  ## The Strimzi Cluster Watcher automatically watches for `kafka.strimzi.io` group, `Kafka` kind resources and will
+  ## configure the Kafka Lag Exporter appropriately.
+  strimzi: false
+  ## When set, restricts the Strimzi watcher to a single namespace using a namespaced Role
+  ## instead of a cluster-scoped ClusterRole. Recommended for multi-tenant clusters.
+  ## Leave empty ("") to watch all namespaces.
+  strimziWatchNamespace: ""
+## Applicable only in non-Strimzi installation. If true, a service account will be created and bind to the deployment.
+## Otherwise, the default service account for the namespace will be used.
+serviceAccount:
+  create: false
+  ## The name of the service account will be generated based on the release name, use nameOverride to override
+  ## with a static name.
+  # nameOverride: my-serviceaccount
+  ## Annotations to add to the service account
+  # annotations:
+  #     iam.gke.io/gcp-service-account: gke-workload@my-gcp-project.iam.gserviceaccount.com
+
+## You can use regex to control the metrics exposed by Prometheus endpoint.
+## Any metric that matches one of the regex in the whitelist will be exposed.
+metricWhitelist:
+  - .*
+
+## The log level of the application (DEBUG, INFO, WARN, ERROR)
+logLevel: INFO
+
+## Additional labels to add to all resources
+additionalLabels: #{}
+  app: kafka-lag-exporter
+
+## You probably won't need to change anything below this line.
+image:
+  repository: seglo/kafka-lag-exporter
+  tag: 1.0.0-go
+  # If digest is set it will be used instead of tag to specify the image
+  # digest: sha256:...
+  pullPolicy: Always
+  pullSecrets: []
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # runAsUser: 1001
+  # runAsNonRoot: true
+  # capabilities:
+  #   drop: ["all"]
+initContainers: []
+service:
+  type: ClusterIP
+  port: 8000
+  additionalLabels: {}
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraConfigmapMounts: []
+extraMounts: []
+
+# Define secrets that are mounted at /opt/kafka-lag-exporter/secrets/ to be used elsewhere
+secrets: {}
+
+secretAnnotations: {}
+
+hostAliases: {}
+
+env: {}
+
+# Define references to configmaps or secrets to be populated as environment variables
+envFromConfigMapRefs: []
+envFromSecretRefs: []
+
+podAnnotations: {}
+
+## Extra labels for the pod
+podExtraLabels: {}
+
+## Extra labels for the deployment
+deploymentExtraLabels: {}
+
+## Readiness and liveness probe initial delay and timeout
+## Go binary starts in <1s so shorter delays are appropriate
+readinessProbeInitialDelay: 5
+readinessProbePeriodSeconds: 5
+readinessProbeTimeout: 5
+readinessProbeFailureThreshold: 3
+readinessProbeSuccessThreshold: 1
+livenessProbeInitialDelay: 10
+livenessProbePeriodSeconds: 15
+livenessProbeTimeout: 5
+livenessProbeFailureThreshold: 3
+livenessProbeSuccessThreshold: 1
+
+prometheus:
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+
+# Allow alert rules to be configured for Prometheus Alertmanager
+prometheusRule:
+  enabled: false
+  rules: []
+
+## PodDisruptionBudget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

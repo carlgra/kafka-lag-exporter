@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kafka-lag-exporter.fullname" . }}-configmap
+  labels:
+    {{- include "kafka-lag-exporter.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    pollIntervalSeconds: {{ .Values.pollIntervalSeconds }}
+    clientGroupId: {{ .Values.clientGroupId | quote }}
+    kafkaClientTimeoutSeconds: {{ .Values.kafkaClientTimeoutSeconds }}
+    kafkaRetries: {{ .Values.kafkaRetries }}
+    logLevel: {{ .Values.logLevel | quote }}
+    metricWhitelist:
+    {{- range .Values.metricWhitelist }}
+      - {{ . | quote }}
+    {{- end }}
+    clusters:
+    {{- if .Values.clusters }}
+    {{- range $cluster := .Values.clusters }}
+      - name: {{ $cluster.name | quote }}
+        bootstrapBrokers: {{ $cluster.bootstrapBrokers | quote }}
+        {{- if $cluster.groupWhitelist }}
+        groupWhitelist:
+        {{- range $cluster.groupWhitelist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.groupBlacklist }}
+        groupBlacklist:
+        {{- range $cluster.groupBlacklist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.topicWhitelist }}
+        topicWhitelist:
+        {{- range $cluster.topicWhitelist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.topicBlacklist }}
+        topicBlacklist:
+        {{- range $cluster.topicBlacklist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.consumerProperties }}
+        consumerProperties:
+        {{- range $key, $val := $cluster.consumerProperties }}
+          {{ $key }}: {{ $val | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.adminClientProperties }}
+        adminClientProperties:
+        {{- range $key, $val := $cluster.adminClientProperties }}
+          {{ $key }}: {{ $val | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if $cluster.labels }}
+        labels:
+        {{- range $key, $val := $cluster.labels }}
+          {{ $key }}: {{ $val | quote }}
+        {{- end }}
+        {{- end }}
+    {{- end }}
+    {{- else }}
+      []
+    {{- end }}
+    lookup:
+      memory:
+        size: {{ .Values.lookupTableSize | default .Values.lookup.memory.size }}
+      redis:
+        enabled: {{ .Values.lookup.redis.enabled }}
+        {{- if .Values.lookup.redis.enabled }}
+        {{- with .Values.lookup.redis }}
+        host: {{ .host | default "localhost" | quote }}
+        port: {{ .port | default 6379 }}
+        database: {{ .database | default 0 }}
+        timeout: {{ .timeout | default 60 }}
+        prefix: {{ .prefix | default "kafka-lag-exporter" | quote }}
+        separator: {{ .separator | default ":" | quote }}
+        retention: {{ .retention | default "1d" | quote }}
+        expiration: {{ .expiration | default "7d" | quote }}
+        {{- end }}
+        {{- end }}
+    sinks:
+      prometheus:
+        enabled: {{ .Values.sinks.prometheus.enabled }}
+        port: {{ .Values.sinks.prometheus.port }}
+      graphite:
+        enabled: {{ .Values.sinks.graphite.enabled }}
+        {{- if .Values.sinks.graphite.enabled }}
+        host: {{ .Values.sinks.graphite.host | quote }}
+        port: {{ .Values.sinks.graphite.port }}
+        prefix: {{ .Values.sinks.graphite.prefix | quote }}
+        {{- end }}
+      influxdb:
+        enabled: {{ .Values.sinks.influxdb.enabled }}
+        {{- if .Values.sinks.influxdb.enabled }}
+        endpoint: {{ .Values.sinks.influxdb.endpoint | quote }}
+        port: {{ .Values.sinks.influxdb.port }}
+        database: {{ .Values.sinks.influxdb.database | quote }}
+        username: {{ .Values.sinks.influxdb.username | quote }}
+        password: {{ .Values.sinks.influxdb.password | quote }}
+        async: {{ .Values.sinks.influxdb.async }}
+        {{- end }}
+    watchers:
+      strimzi: {{ .Values.watchers.strimzi }}
