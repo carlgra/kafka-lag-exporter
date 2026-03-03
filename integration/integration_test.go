@@ -296,14 +296,14 @@ func TestInfluxDBSink(t *testing.T) {
 	defer influx.Stop()
 
 	// Report some metrics.
-	influx.Report(metrics.MetricValue{
+	influx.Report(ctx, metrics.MetricValue{
 		Definition: metrics.PartitionLatestOffset,
-		Labels:     []string{"test-cluster", "test-topic", "0"},
+		Labels:     map[string]string{"cluster_name": "test-cluster", "topic": "test-topic", "partition": "0"},
 		Value:      12345,
 	})
-	influx.Report(metrics.MetricValue{
+	influx.Report(ctx, metrics.MetricValue{
 		Definition: metrics.GroupLag,
-		Labels:     []string{"test-cluster", "test-group", "test-topic", "0", "", "", ""},
+		Labels:     map[string]string{"cluster_name": "test-cluster", "group": "test-group", "topic": "test-topic", "partition": "0", "member_host": "", "consumer_id": "", "client_id": ""},
 		Value:      42,
 	})
 
@@ -334,13 +334,13 @@ type recordingSink struct {
 	removed  []metrics.RemoveMetric
 }
 
-func (r *recordingSink) Report(m metrics.MetricValue) {
+func (r *recordingSink) Report(_ context.Context, m metrics.MetricValue) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reported = append(r.reported, m)
 }
 
-func (r *recordingSink) Remove(m metrics.RemoveMetric) {
+func (r *recordingSink) Remove(_ context.Context, m metrics.RemoveMetric) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.removed = append(r.removed, m)
