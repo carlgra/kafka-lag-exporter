@@ -119,7 +119,7 @@ func main() {
 
 	if err := mgr.Start(ctx); err != nil {
 		logger.Error("failed to start manager", "error", err)
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // intentional exit on startup failure
 	}
 
 	logger.Info("kafka-lag-exporter started successfully")
