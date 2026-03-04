@@ -17,7 +17,7 @@ Features:
 - Optional [Redis](https://redis.io/) persistence for the offset lookup table
 - Lightweight single binary with no JVM required
 
-<img width="538" height="136" alt="image" src="https://github.com/user-attachments/assets/ce189e1b-19ca-4115-8d3f-00a2dd8c8be1" />
+<img width="1793" height="851" alt="image" src="https://github.com/user-attachments/assets/f45eae1d-17d9-4fd5-b3ea-ba8e614289b7" />
 
 ### History
 
