@@ -60,12 +60,22 @@ func (s *GraphiteSink) Report(_ context.Context, m metrics.MetricValue) {
 	line := fmt.Sprintf("%s %v %d\n", path, m.Value, now)
 
 	s.mu.Lock()
-	if s.maxBufSize > 0 && s.buf.Len()+len(line) > s.maxBufSize {
-		s.logger.Warn("graphite buffer full, dropping metric", "metric", m.Definition.Name, "bufSize", s.buf.Len())
-		s.mu.Unlock()
-		return
-	}
 	s.buf.WriteString(line)
+	if s.maxBufSize > 0 && s.buf.Len() > s.maxBufSize {
+		overflow := s.buf.Len() - s.maxBufSize
+		data := s.buf.Bytes()
+		// Advance past the overflow region to the next newline so we drop
+		// whole lines (complete metrics) rather than leaving a partial line.
+		idx := bytes.IndexByte(data[overflow:], '\n')
+		if idx >= 0 {
+			drop := overflow + idx + 1
+			remaining := make([]byte, len(data)-drop)
+			copy(remaining, data[drop:])
+			s.buf.Reset()
+			s.buf.Write(remaining)
+		}
+		s.logger.Warn("graphite buffer full, dropped oldest metrics", "metric", m.Definition.Name, "bufSize", s.buf.Len())
+	}
 	s.mu.Unlock()
 }
 
