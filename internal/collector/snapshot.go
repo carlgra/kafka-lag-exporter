@@ -38,6 +38,9 @@ func RemovedGroupTopicPartitions(prev, current *OffsetsSnapshot) []domain.GroupT
 	if prev == nil {
 		return nil
 	}
+	if current == nil {
+		return nil
+	}
 	currentSet := make(map[domain.GroupTopicPartition]bool, len(current.GroupOffsets))
 	for gtp := range current.GroupOffsets {
 		currentSet[gtp] = true
@@ -55,6 +58,9 @@ func RemovedGroupTopicPartitions(prev, current *OffsetsSnapshot) []domain.GroupT
 // RemovedTopicPartitions returns TPs that were in prev but not in current.
 func RemovedTopicPartitions(prev, current *OffsetsSnapshot) []domain.TopicPartition {
 	if prev == nil {
+		return nil
+	}
+	if current == nil {
 		return nil
 	}
 	currentSet := make(map[domain.TopicPartition]bool, len(current.LatestOffsets))

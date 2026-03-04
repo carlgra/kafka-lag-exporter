@@ -661,6 +661,20 @@ func TestSnapshot_RemovedTPs_NilPrev(t *testing.T) {
 	assert.Nil(t, RemovedTopicPartitions(nil, current))
 }
 
+func TestSnapshot_RemovedGTPs_NilCurrent(t *testing.T) {
+	prev := &OffsetsSnapshot{GroupOffsets: domain.GroupOffsets{
+		{Group: "g1", Topic: "t1", Partition: 0}: {Offset: 10},
+	}}
+	assert.Nil(t, RemovedGroupTopicPartitions(prev, nil))
+}
+
+func TestSnapshot_RemovedTPs_NilCurrent(t *testing.T) {
+	prev := &OffsetsSnapshot{LatestOffsets: domain.PartitionOffsets{
+		{Topic: "t1", Partition: 0}: {Offset: 100},
+	}}
+	assert.Nil(t, RemovedTopicPartitions(prev, nil))
+}
+
 // --- Negative lag clamping --------------------------------------------------
 
 func TestCollector_NegativeLagClampedToZero(t *testing.T) {
