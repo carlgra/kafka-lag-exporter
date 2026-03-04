@@ -1,0 +1,21 @@
+pollIntervalSeconds: 10
+clientGroupId: "kafkalagexporter"
+kafkaClientTimeoutSeconds: 10
+logLevel: "INFO"
+
+clusters:
+  - name: "demo"
+    bootstrapBrokers: "redpanda:9092"
+    groupWhitelist:
+      - ".*"
+    topicWhitelist:
+      - ".*"
+
+lookup:
+  memory:
+    size: 60
+
+sinks:
+  prometheus:
+    enabled: true
+    port: 8000
