@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -337,7 +338,7 @@ func TestStrimziWatcher_HandleEvent_InvalidObject(t *testing.T) {
 	}
 
 	// Send a watch.Event with a metav1.Status instead of an Unstructured.
-	w.handleEvent(watch.Event{
+	w.handleEvent(context.Background(), watch.Event{
 		Type:   watch.Added,
 		Object: &metav1.Status{Message: "test"},
 	})
