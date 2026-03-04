@@ -62,7 +62,7 @@ type PrometheusSink struct {
 
 // NewPrometheusSink creates and starts a Prometheus HTTP endpoint on the given port.
 // If bindAddress is empty, it binds to all interfaces (0.0.0.0).
-func NewPrometheusSink(port int, bindAddress string, filter *MetricFilter, logger *slog.Logger) (*PrometheusSink, error) {
+func NewPrometheusSink(port int, bindAddress string, maxTimeSeries int, filter *MetricFilter, logger *slog.Logger) (*PrometheusSink, error) {
 	reg := prometheus.NewRegistry()
 
 	gauges := make(map[string]*prometheus.GaugeVec)
@@ -120,7 +120,7 @@ func NewPrometheusSink(port int, bindAddress string, filter *MetricFilter, logge
 		gauges:        gauges,
 		filter:        filter,
 		logger:        logger,
-		maxTimeSeries: 100000,
+		maxTimeSeries: maxTimeSeries,
 		pollsTotal:    pollsTotal,
 		pollErrors:    pollErrors,
 		pollDuration:  pollDuration,

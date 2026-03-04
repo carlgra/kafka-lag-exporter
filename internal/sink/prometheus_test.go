@@ -30,7 +30,7 @@ func TestPrometheusSink_ReportAndScrape(t *testing.T) {
 	filter, err := NewMetricFilter([]string{".*"})
 	require.NoError(t, err)
 
-	sink, err := NewPrometheusSink(port, "", filter, logger)
+	sink, err := NewPrometheusSink(port, "", 100000, filter, logger)
 	require.NoError(t, err)
 	defer sink.Stop()
 
@@ -68,7 +68,7 @@ func TestPrometheusSink_Remove(t *testing.T) {
 	filter, err := NewMetricFilter([]string{".*"})
 	require.NoError(t, err)
 
-	sink, err := NewPrometheusSink(port, "", filter, logger)
+	sink, err := NewPrometheusSink(port, "", 100000, filter, logger)
 	require.NoError(t, err)
 	defer sink.Stop()
 
@@ -104,7 +104,7 @@ func TestPrometheusSink_Filter(t *testing.T) {
 	filter, err := NewMetricFilter([]string{"kafka_consumergroup.*"})
 	require.NoError(t, err)
 
-	sink, err := NewPrometheusSink(port, "", filter, logger)
+	sink, err := NewPrometheusSink(port, "", 100000, filter, logger)
 	require.NoError(t, err)
 	defer sink.Stop()
 
@@ -139,7 +139,7 @@ func TestPrometheusSink_Filter(t *testing.T) {
 func TestPrometheusSink_NaN_Ignored(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -160,7 +160,7 @@ func TestPrometheusSink_NaN_Ignored(t *testing.T) {
 func TestPrometheusSink_Inf_Ignored(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -187,7 +187,7 @@ func TestPrometheusSink_Inf_Ignored(t *testing.T) {
 func TestPrometheusSink_HealthEndpoint(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -200,7 +200,7 @@ func TestPrometheusSink_HealthEndpoint(t *testing.T) {
 
 func TestPrometheusSink_NilFilter(t *testing.T) {
 	port := getFreePort()
-	sink, err := NewPrometheusSink(port, "", nil, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, nil, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -222,7 +222,7 @@ func TestPrometheusSink_NilFilter(t *testing.T) {
 func TestPrometheusSink_UnknownMetric(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	ctx := context.Background()

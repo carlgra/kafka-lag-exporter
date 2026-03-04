@@ -87,9 +87,10 @@ type SinksConfig struct {
 
 // PrometheusSinkConfig configures the Prometheus sink.
 type PrometheusSinkConfig struct {
-	Enabled     bool   `mapstructure:"enabled"`
-	Port        int    `mapstructure:"port"`
-	BindAddress string `mapstructure:"bindAddress"`
+	Enabled       bool   `mapstructure:"enabled"`
+	Port          int    `mapstructure:"port"`
+	BindAddress   string `mapstructure:"bindAddress"`
+	MaxTimeSeries int    `mapstructure:"maxTimeSeries"`
 }
 
 // GraphiteSinkConfig configures the Graphite sink.
@@ -164,6 +165,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("sinks.prometheus.enabled", true)
 	v.SetDefault("sinks.prometheus.port", 8000)
 	v.SetDefault("sinks.prometheus.bindAddress", "")
+	v.SetDefault("sinks.prometheus.maxTimeSeries", 100000)
 	v.SetDefault("sinks.graphite.enabled", false)
 	v.SetDefault("sinks.graphite.host", "localhost")
 	v.SetDefault("sinks.graphite.port", 2003)

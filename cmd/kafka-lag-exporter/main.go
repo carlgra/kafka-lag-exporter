@@ -65,7 +65,7 @@ func main() {
 	var promSink *sink.PrometheusSink
 
 	if cfg.Sinks.Prometheus.Enabled {
-		promSink, err = sink.NewPrometheusSink(cfg.Sinks.Prometheus.Port, cfg.Sinks.Prometheus.BindAddress, filter, logger.With("sink", "prometheus"))
+		promSink, err = sink.NewPrometheusSink(cfg.Sinks.Prometheus.Port, cfg.Sinks.Prometheus.BindAddress, cfg.Sinks.Prometheus.MaxTimeSeries, filter, logger.With("sink", "prometheus"))
 		if err != nil {
 			logger.Error("failed to create prometheus sink", "error", err)
 			os.Exit(1)
