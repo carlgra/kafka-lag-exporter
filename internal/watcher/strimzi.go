@@ -110,12 +110,12 @@ func (w *StrimziWatcher) watch(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("watch channel closed")
 			}
-			w.handleEvent(event)
+			w.handleEvent(ctx, event)
 		}
 	}
 }
 
-func (w *StrimziWatcher) handleEvent(event watch.Event) {
+func (w *StrimziWatcher) handleEvent(ctx context.Context, event watch.Event) {
 	obj, ok := event.Object.(*unstructured.Unstructured)
 	if !ok {
 		w.logger.Warn("unexpected object type in watch event")
@@ -142,8 +142,7 @@ func (w *StrimziWatcher) handleEvent(event watch.Event) {
 
 	select {
 	case w.events <- ce:
-	default:
-		w.logger.Warn("watcher event channel full, dropping event", "cluster", cluster.Name, "type", event.Type)
+	case <-ctx.Done():
 	}
 }
 
