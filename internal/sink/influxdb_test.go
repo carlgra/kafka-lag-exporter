@@ -228,8 +228,7 @@ func TestInfluxDBSink_WithAuth(t *testing.T) {
 
 	sink, err := NewInfluxDBSink(server.URL, 0, "testdb", "user", "pass", false, nil, slog.Default())
 	require.NoError(t, err)
-	defer sink.Stop()
-	// Just verify it doesn't error out with auth params.
+	sink.Stop()
 }
 
 func TestInfluxDBSink_Async(t *testing.T) {

@@ -8,31 +8,19 @@ linters:
     - unused
     - ineffassign
     - gocritic
+  settings:
+    gocritic:
+      enabled-checks:
+        - badLock
+        - badRegexp
+        - nilValReturn
+        - truncateCmp
+        - unnecessaryDefer
+        - weakCond
 
 formatters:
   enable:
     - gofmt
-
-linters-settings:
-  gocritic:
-    enabled-checks:
-      - appendAssign
-      - argOrder
-      - badCall
-      - badCond
-      - badLock
-      - badRegexp
-      - dupArg
-      - dupBranchBody
-      - dupCase
-      - dupSubExpr
-      - exitAfterDefer
-      - flagDeref
-      - nilValReturn
-      - sloppyLen
-      - truncateCmp
-      - unnecessaryDefer
-      - weakCond
 
 issues:
   max-issues-per-linter: 0

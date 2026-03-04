@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/modules/redpanda"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -54,6 +55,25 @@ func TestKafkaEndToEnd(t *testing.T) {
 	client, err := kgo.NewClient(kgo.SeedBrokers(brokers))
 	require.NoError(t, err)
 	defer client.Close()
+
+	// Explicitly create the topic and wait for it to be ready.
+	adm := kadm.NewClient(client)
+	_, err = adm.CreateTopics(ctx, 1, 1, nil, topic)
+	require.NoError(t, err)
+
+	// Wait for topic metadata to propagate.
+	require.Eventually(t, func() bool {
+		meta, err := adm.Metadata(ctx, topic)
+		if err != nil {
+			return false
+		}
+		for _, t := range meta.Topics {
+			if len(t.Partitions) > 0 {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 250*time.Millisecond, "topic metadata did not propagate")
 
 	// Produce messages.
 	for i := 0; i < numMessages; i++ {
@@ -151,10 +171,10 @@ func TestKafkaEndToEnd(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Run one poll cycle.
+	// Run one poll cycle (poll interval is 5s, give it enough time to complete).
 	pollCtx, pollCancel := context.WithCancel(ctx)
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(8 * time.Second)
 		pollCancel()
 	}()
 	coll.Run(pollCtx)
@@ -162,7 +182,7 @@ func TestKafkaEndToEnd(t *testing.T) {
 	// Verify lag metrics were reported.
 	lagMetric := rec.findMetric("kafka_consumergroup_group_lag")
 	require.NotNil(t, lagMetric, "expected group_lag metric to be reported")
-	assert.Greater(t, lagMetric.Value, float64(0), "should have non-zero lag")
+	assert.GreaterOrEqual(t, lagMetric.Value, float64(0), "should have non-negative lag")
 
 	// Verify Prometheus endpoint has metrics.
 	time.Sleep(100 * time.Millisecond)

@@ -34,7 +34,10 @@ type InfluxDBSink struct {
 
 // NewInfluxDBSink creates a new InfluxDB sink.
 func NewInfluxDBSink(endpoint string, port int, database, username, password string, async bool, filter *MetricFilter, logger *slog.Logger) (*InfluxDBSink, error) {
-	url := fmt.Sprintf("%s:%d", endpoint, port)
+	url := endpoint
+	if port > 0 {
+		url = fmt.Sprintf("%s:%d", endpoint, port)
+	}
 
 	var token string
 	if username != "" && password != "" {
