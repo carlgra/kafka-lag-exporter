@@ -235,7 +235,9 @@ func TestRedisLookupTable(t *testing.T) {
 		MaxSize:    100,
 	}
 
-	table := lookup.NewRedisTable(cfg, "cluster1", "topic1", 0, slog.Default())
+	redisClient := lookup.NewRedisClient(cfg)
+	defer redisClient.Close()
+	table := lookup.NewRedisTable(redisClient, cfg, "cluster1", "topic1", 0, slog.Default())
 
 	// Test full AddPoint/Lookup cycle.
 	assert.Equal(t, lookup.Inserted, table.AddPoint(lookup.Point{Offset: 100, Time: 1000}))
