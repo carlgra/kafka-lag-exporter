@@ -240,3 +240,110 @@ func TestPrometheusSink_UnknownMetric(t *testing.T) {
 		Labels:     map[string]string{"a": "val"},
 	})
 }
+
+func TestPrometheusSink_ReportPollMetrics(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	sink.ReportPollMetrics(2*time.Second, true)
+	sink.ReportPollMetrics(3*time.Second, false)
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_polls_total 2")
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_poll_errors_total 1")
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_poll_duration_seconds 3")
+}
+
+func TestPrometheusSink_ReportLookupTableSize(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	sink.ReportLookupTableSize("my-cluster", "my-topic", "0", 42)
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_lookup_table_entries")
+	assert.Contains(t, bodyStr, `cluster_name="my-cluster"`)
+	assert.Contains(t, bodyStr, "42")
+}
+
+func TestPrometheusSink_CardinalityLimit(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	// Set a low cardinality limit for testing.
+	sink.maxTimeSeries = 5
+	sink.seriesCount.Store(5) // Already at the limit.
+
+	ctx := context.Background()
+	sink.Report(ctx, metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+		Value:      100,
+	})
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// The metric should have been dropped.
+	assert.False(t, strings.Contains(bodyStr, `kafka_partition_latest_offset{`))
+	// The dropped counter should be incremented.
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_dropped_series_total 1")
+}
+
+func TestPrometheusSink_ReadyEndpoint_NoCheck(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	// No readiness check set — should return 200.
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ready", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestPrometheusSink_ReadyEndpoint_Failing(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	sink.SetReadinessCheck(func() error {
+		return fmt.Errorf("no collectors have polled")
+	})
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ready", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}

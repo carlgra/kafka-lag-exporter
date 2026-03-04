@@ -1,0 +1,21 @@
+suite: service
+templates:
+  - 050-Service.yaml
+tests:
+  - it: should have default ClusterIP type
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: should use port 8000 by default
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 8000
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 8000
+      - equal:
+          path: spec.ports[0].name
+          value: http
