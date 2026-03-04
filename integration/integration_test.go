@@ -310,12 +310,13 @@ func TestInfluxDBSink(t *testing.T) {
 	// Check that data was received.
 	var bodies []string
 	timeout := time.After(5 * time.Second)
+loop:
 	for len(bodies) < 2 {
 		select {
 		case body := <-received:
 			bodies = append(bodies, body)
 		case <-timeout:
-			break
+			break loop
 		}
 	}
 

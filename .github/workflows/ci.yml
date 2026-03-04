@@ -23,7 +23,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: "v2"
+          version: "v2.10.1"
 
       - name: go vet
         run: go vet ./...
