@@ -40,6 +40,12 @@ type Collector struct {
 	// Health tracking.
 	lastPollTime    atomic.Int64
 	lastPollSuccess atomic.Bool
+
+	// Pre-allocated aggregation maps, reused across poll cycles to reduce GC pressure.
+	maxLag        map[groupKey]float64
+	maxLagSeconds map[groupKey]float64
+	sumLag        map[groupKey]float64
+	topicSumLag   map[groupTopicKey]float64
 }
 
 // NewCollector creates a collector for the given cluster.
@@ -61,6 +67,10 @@ func NewCollector(
 		lookupFactory: lookupFactory,
 		pollInterval:  pollInterval,
 		logger:        logger.With("cluster", clusterCfg.Name),
+		maxLag:        make(map[groupKey]float64),
+		maxLagSeconds: make(map[groupKey]float64),
+		sumLag:        make(map[groupKey]float64),
+		topicSumLag:   make(map[groupTopicKey]float64),
 	}
 
 	for _, opt := range opts {
@@ -337,13 +347,19 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 	}
 
 	// Aggregate lag per group and per group-topic.
-	type groupKey struct{ group string }
-	type groupTopicKey struct{ group, topic string }
-
-	maxLag := make(map[groupKey]float64)
-	maxLagSeconds := make(map[groupKey]float64)
-	sumLag := make(map[groupKey]float64)
-	topicSumLag := make(map[groupTopicKey]float64)
+	// Clear and reuse pre-allocated maps to reduce GC pressure.
+	for k := range c.maxLag {
+		delete(c.maxLag, k)
+	}
+	for k := range c.maxLagSeconds {
+		delete(c.maxLagSeconds, k)
+	}
+	for k := range c.sumLag {
+		delete(c.sumLag, k)
+	}
+	for k := range c.topicSumLag {
+		delete(c.topicSumLag, k)
+	}
 
 	for gtp, groupOffset := range snapshot.GroupOffsets {
 		tp := gtp.TopicPartition()
@@ -408,40 +424,40 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 		gk := groupKey{group: gtp.Group}
 		gtk := groupTopicKey{group: gtp.Group, topic: gtp.Topic}
 
-		sumLag[gk] += lagF
-		topicSumLag[gtk] += lagF
+		c.sumLag[gk] += lagF
+		c.topicSumLag[gtk] += lagF
 
-		if lagF > maxLag[gk] {
-			maxLag[gk] = lagF
+		if lagF > c.maxLag[gk] {
+			c.maxLag[gk] = lagF
 		}
-		if !math.IsNaN(lagSeconds) && lagSeconds > maxLagSeconds[gk] {
-			maxLagSeconds[gk] = lagSeconds
+		if !math.IsNaN(lagSeconds) && lagSeconds > c.maxLagSeconds[gk] {
+			c.maxLagSeconds[gk] = lagSeconds
 		}
 	}
 
 	// Aggregate metrics.
-	for gk, v := range maxLag {
+	for gk, v := range c.maxLag {
 		result = append(result, metrics.MetricValue{
 			Definition: metrics.GroupMaxLag,
 			Labels:     c.makeLabels("cluster_name", c.clusterName, "group", gk.group),
 			Value:      v,
 		})
 	}
-	for gk, v := range maxLagSeconds {
+	for gk, v := range c.maxLagSeconds {
 		result = append(result, metrics.MetricValue{
 			Definition: metrics.GroupMaxLagSeconds,
 			Labels:     c.makeLabels("cluster_name", c.clusterName, "group", gk.group),
 			Value:      v,
 		})
 	}
-	for gk, v := range sumLag {
+	for gk, v := range c.sumLag {
 		result = append(result, metrics.MetricValue{
 			Definition: metrics.GroupSumLag,
 			Labels:     c.makeLabels("cluster_name", c.clusterName, "group", gk.group),
 			Value:      v,
 		})
 	}
-	for gtk, v := range topicSumLag {
+	for gtk, v := range c.topicSumLag {
 		result = append(result, metrics.MetricValue{
 			Definition: metrics.GroupTopicSumLag,
 			Labels:     c.makeLabels("cluster_name", c.clusterName, "group", gtk.group, "topic", gtk.topic),
@@ -509,6 +525,9 @@ func (c *Collector) evictRemoved(ctx context.Context, current *OffsetsSnapshot) 
 		}
 	}
 }
+
+// groupKey identifies a consumer group for aggregation maps.
+type groupKey struct{ group string }
 
 func collectGroups(s *OffsetsSnapshot) map[string]bool {
 	groups := make(map[string]bool)
