@@ -37,8 +37,10 @@ type RedisTableConfig struct {
 	TLS        bool
 }
 
-// NewRedisTable creates a new RedisTable for a specific topic-partition.
-func NewRedisTable(cfg RedisTableConfig, clusterName, topic string, partition int32, logger *slog.Logger) *RedisTable {
+// NewRedisClient creates a shared Redis client from the given config.
+// Callers should create one client and pass it to NewRedisTable for each
+// topic-partition, rather than creating a client per table.
+func NewRedisClient(cfg RedisTableConfig) *redis.Client {
 	opts := &redis.Options{
 		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		DB:          cfg.Database,
@@ -50,8 +52,12 @@ func NewRedisTable(cfg RedisTableConfig, clusterName, topic string, partition in
 			MinVersion: tls.VersionTLS12,
 		}
 	}
-	client := redis.NewClient(opts)
+	return redis.NewClient(opts)
+}
 
+// NewRedisTable creates a new RedisTable for a specific topic-partition
+// using a shared Redis client.
+func NewRedisTable(client *redis.Client, cfg RedisTableConfig, clusterName, topic string, partition int32, logger *slog.Logger) *RedisTable {
 	key := fmt.Sprintf("%s%s%s%s%s%s%d",
 		cfg.Prefix, cfg.Separator,
 		clusterName, cfg.Separator,
@@ -239,7 +245,7 @@ func (t *RedisTable) Length() int64 {
 	return count
 }
 
-// Close shuts down the Redis client.
+// Close is a no-op — the shared Redis client is managed externally.
 func (t *RedisTable) Close() error {
-	return t.client.Close()
+	return nil
 }

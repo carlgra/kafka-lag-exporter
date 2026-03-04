@@ -180,12 +180,11 @@ func createLookupFactory(cfg *config.Config, logger *slog.Logger) func() lookup.
 			"prefix", redisCfg.Prefix,
 		)
 
-		// Redis tables need cluster/topic/partition context at creation time.
-		// The collector creates lookup tables per topic-partition, so we return
-		// a factory that creates a generic Redis table. The RedisTable key
-		// is constructed from the prefix, so each gets a unique key.
+		// Create a single shared Redis client for all lookup tables.
+		redisClient := lookup.NewRedisClient(redisCfg)
+
 		return func() lookup.LookupTable {
-			return lookup.NewRedisTable(redisCfg, "default", "default", 0, logger.With("component", "redis-lookup"))
+			return lookup.NewRedisTable(redisClient, redisCfg, "default", "default", 0, logger.With("component", "redis-lookup"))
 		}
 	}
 
