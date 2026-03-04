@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -217,6 +218,20 @@ func ParseRetentionDuration(s string) (time.Duration, error) {
 func validate(cfg *Config) error {
 	if cfg.PollIntervalSeconds <= 0 {
 		return fmt.Errorf("pollIntervalSeconds must be > 0, got %d", cfg.PollIntervalSeconds)
+	}
+	if cfg.KafkaClientTimeoutSeconds <= 0 {
+		return fmt.Errorf("kafkaClientTimeoutSeconds must be > 0, got %d", cfg.KafkaClientTimeoutSeconds)
+	}
+	if cfg.KafkaRetries < 0 {
+		return fmt.Errorf("kafkaRetries must be >= 0, got %d", cfg.KafkaRetries)
+	}
+	if cfg.ClientGroupID == "" {
+		return fmt.Errorf("clientGroupId must not be empty")
+	}
+	for i, pattern := range cfg.MetricWhitelist {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("metricWhitelist[%d] is not a valid regex %q: %w", i, pattern, err)
+		}
 	}
 	if cfg.Sinks.Prometheus.Enabled {
 		if cfg.Sinks.Prometheus.Port <= 0 || cfg.Sinks.Prometheus.Port > 65535 {

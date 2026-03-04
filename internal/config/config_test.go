@@ -116,6 +116,26 @@ func TestLoad_ValidationErrors(t *testing.T) {
 			errMsg: "lookup.memory.size must be >= 2",
 		},
 		{
+			name:   "invalid timeout",
+			yaml:   "kafkaClientTimeoutSeconds: 0",
+			errMsg: "kafkaClientTimeoutSeconds must be > 0",
+		},
+		{
+			name:   "negative retries",
+			yaml:   "kafkaRetries: -1",
+			errMsg: "kafkaRetries must be >= 0",
+		},
+		{
+			name:   "empty client group ID",
+			yaml:   "clientGroupId: \"\"",
+			errMsg: "clientGroupId must not be empty",
+		},
+		{
+			name:   "invalid metric whitelist regex",
+			yaml:   "metricWhitelist:\n  - \"[invalid\"",
+			errMsg: "metricWhitelist[0] is not a valid regex",
+		},
+		{
 			name:   "cluster missing name",
 			yaml:   "clusters:\n  - bootstrapBrokers: localhost:9092",
 			errMsg: "cluster[0].name is required",
