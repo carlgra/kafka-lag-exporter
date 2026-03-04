@@ -171,3 +171,31 @@ func TestGraphiteSink_Stop_Noop(t *testing.T) {
 	s := &GraphiteSink{}
 	s.Stop() // Should not panic.
 }
+
+func TestGraphiteSink_BufferOverflow_DropsOldest(t *testing.T) {
+	filter, _ := NewMetricFilter([]string{".*"})
+	s := NewGraphiteSink("127.0.0.1", 1, "test", false, filter, slog.Default())
+	s.maxBufSize = 100 // Very small buffer.
+
+	ctx := context.Background()
+	// Fill the buffer with metrics.
+	for i := 0; i < 20; i++ {
+		s.Report(ctx, metrics.MetricValue{
+			Definition: metrics.PartitionLatestOffset,
+			Labels:     map[string]string{"cluster_name": "cluster", "topic": "topic", "partition": "0"},
+			Value:      float64(i),
+		})
+	}
+
+	s.mu.Lock()
+	bufLen := s.buf.Len()
+	bufContent := s.buf.String()
+	s.mu.Unlock()
+
+	// Buffer should be capped near maxBufSize.
+	assert.LessOrEqual(t, bufLen, s.maxBufSize)
+	// Should contain the latest metrics, not the oldest.
+	assert.Contains(t, bufContent, "19")
+	// Should NOT contain the earliest metric.
+	assert.NotContains(t, bufContent, " 0 ")
+}
