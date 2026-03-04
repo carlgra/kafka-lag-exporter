@@ -17,6 +17,8 @@ Features:
 - Optional [Redis](https://redis.io/) persistence for the offset lookup table
 - Lightweight single binary with no JVM required
 
+<img width="538" height="136" alt="image" src="https://github.com/user-attachments/assets/ce189e1b-19ca-4115-8d3f-00a2dd8c8be1" />
+
 ### History
 
 This project is a **Go rewrite** of the original [Kafka Lag Exporter](https://github.com/seglo/kafka-lag-exporter) by [Sean Glover](https://github.com/seglo) and contributors. The original was an Akka Typed application written in Scala. This rewrite maintains full compatibility with the original's metrics, configuration, and Helm chart while providing the operational benefits of a statically compiled Go binary (faster startup, lower memory usage, simpler deployment).
