@@ -125,7 +125,7 @@ func TestNewRedisTable(t *testing.T) {
 	}
 
 	client := NewRedisClient(cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	table := NewRedisTable(client, cfg, "test-cluster", "test-topic", 0, slog.Default())
 	require.NotNil(t, table)
 	assert.Equal(t, "kafka-lag-exporter:test-cluster:test-topic:0", table.key)
