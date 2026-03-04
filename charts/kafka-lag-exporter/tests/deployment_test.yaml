@@ -1,0 +1,60 @@
+suite: deployment
+templates:
+  - 040-Deployment.yaml
+tests:
+  - it: should render default image
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "seglo/kafka-lag-exporter:1.0.0-go"
+
+  - it: should set resource requests and limits
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 50m
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 64Mi
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 200m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 256Mi
+
+  - it: should configure liveness probe on /health
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+
+  - it: should configure readiness probe on /ready
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /ready
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+
+  - it: should have config checksum annotation
+    asserts:
+      - isNotNull:
+          path: spec.template.metadata.annotations["checksum/config"]
+
+  - it: should set serviceAccountName when strimzi is enabled
+    set:
+      watchers:
+        strimzi: true
+    asserts:
+      - isNotNull:
+          path: spec.template.spec.serviceAccountName
+
+  - it: should not set serviceAccountName by default
+    asserts:
+      - isNull:
+          path: spec.template.spec.serviceAccountName

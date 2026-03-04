@@ -398,6 +398,35 @@ func (s *trackingStopSink) Stop() {
 	}
 }
 
+func TestManager_ReadinessCheck_NoCollectors(t *testing.T) {
+	mgr := New(testConfig(), []sink.Sink{&noopSink{}}, func() lookup.LookupTable {
+		return lookup.NewMemoryTable(60)
+	}, slog.Default(), WithClientFactory(mockFactory(nil)))
+
+	err := mgr.ReadinessCheck()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no collectors configured")
+}
+
+func TestManager_ReadinessCheck_NonePolled(t *testing.T) {
+	clients := make(map[string]*mockKafkaClient)
+	mgr := New(testConfig(), []sink.Sink{&noopSink{}}, func() lookup.LookupTable {
+		return lookup.NewMemoryTable(60)
+	}, slog.Default(), WithClientFactory(mockFactory(clients)))
+
+	ctx := context.Background()
+	err := mgr.AddCluster(ctx, config.ClusterConfig{Name: "c1", BootstrapBrokers: "b:9092"})
+	require.NoError(t, err)
+
+	// The collector has been added but hasn't polled yet (lastPollTime=0).
+	// ReadinessCheck skips collectors with lastPollTime=0, so no healthy collector found.
+	err = mgr.ReadinessCheck()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no collectors have polled successfully within threshold")
+
+	mgr.Stop()
+}
+
 func TestManager_WatcherEvents_AddClusterError(t *testing.T) {
 	mgr := New(testConfig(), []sink.Sink{&noopSink{}}, func() lookup.LookupTable {
 		return lookup.NewMemoryTable(60)

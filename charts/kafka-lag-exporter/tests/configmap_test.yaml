@@ -1,0 +1,51 @@
+suite: configmap
+templates:
+  - 030-ConfigMap.yaml
+tests:
+  - it: should render default config values
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "pollIntervalSeconds: 30"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "kafkaClientTimeoutSeconds: 10"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'logLevel: "INFO"'
+
+  - it: should render cluster config
+    set:
+      clusters:
+        - name: my-cluster
+          bootstrapBrokers: "broker:9092"
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'name: "my-cluster"'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'bootstrapBrokers: "broker:9092"'
+
+  - it: should render metric whitelist
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "metricWhitelist:"
+
+  - it: should render redis config when enabled
+    set:
+      lookup:
+        memory:
+          size: 60
+        redis:
+          enabled: true
+          host: redis-host
+          port: 6380
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: \"redis-host\""
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "port: 6380"

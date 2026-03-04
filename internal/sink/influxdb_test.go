@@ -231,6 +231,31 @@ func TestInfluxDBSink_WithAuth(t *testing.T) {
 	sink.Stop()
 }
 
+func TestInfluxDBSink_Port0_NoPortInURL(t *testing.T) {
+	var receivedHost string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHost = r.Host
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	// Port 0 should not append ":0" — the full URL is used as-is.
+	sink, err := NewInfluxDBSink(server.URL, 0, "testdb", "", "", false, nil, slog.Default())
+	require.NoError(t, err)
+
+	sink.Report(context.Background(), metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+		Value:      1,
+	})
+
+	// The host should be the httptest server URL (host:port from httptest), not with ":0" appended.
+	if receivedHost != "" {
+		assert.NotContains(t, receivedHost, ":0:")
+	}
+	sink.Stop()
+}
+
 func TestInfluxDBSink_Async(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

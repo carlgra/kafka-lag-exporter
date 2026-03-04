@@ -1,0 +1,24 @@
+suite: servicemonitor
+templates:
+  - 060-ServiceMonitor.yaml
+tests:
+  - it: should not render when disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render when enabled with correct apiVersion and kind
+    set:
+      prometheus:
+        serviceMonitor:
+          enabled: true
+          interval: "30s"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: apiVersion
+          value: monitoring.coreos.com/v1
+      - equal:
+          path: kind
+          value: ServiceMonitor

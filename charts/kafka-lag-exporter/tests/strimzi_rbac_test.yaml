@@ -1,0 +1,35 @@
+suite: strimzi rbac
+templates:
+  - 010-StrimziWatcher-ClusterRole.yaml
+tests:
+  - it: should not render when strimzi is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render ClusterRole when strimzi is enabled
+    set:
+      watchers:
+        strimzi: true
+        strimziWatchNamespace: ""
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ClusterRole
+
+  - it: should render Role when namespace-scoped
+    set:
+      watchers:
+        strimzi: true
+        strimziWatchNamespace: "my-namespace"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: Role
+      - equal:
+          path: metadata.namespace
+          value: my-namespace
