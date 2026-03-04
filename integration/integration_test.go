@@ -159,7 +159,7 @@ func TestKafkaEndToEnd(t *testing.T) {
 	rec := &recordingSink{}
 	port := 19190 + int(time.Now().UnixNano()%100)
 	filter, _ := sink.NewMetricFilter([]string{".*"})
-	promSink, err := sink.NewPrometheusSink(port, "", filter, slog.Default())
+	promSink, err := sink.NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	require.NoError(t, err)
 	defer promSink.Stop()
 
