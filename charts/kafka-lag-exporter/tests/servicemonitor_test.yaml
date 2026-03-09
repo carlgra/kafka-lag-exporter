@@ -22,3 +22,15 @@ tests:
       - equal:
           path: kind
           value: ServiceMonitor
+
+  - it: should include honorLabels when set
+    set:
+      prometheus:
+        serviceMonitor:
+          enabled: true
+          interval: "30s"
+          honorLabels: true
+    asserts:
+      - equal:
+          path: spec.endpoints[0].honorLabels
+          value: true

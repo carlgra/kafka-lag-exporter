@@ -11,34 +11,62 @@ data:
     kafkaClientTimeoutSeconds: {{ .Values.kafkaClientTimeoutSeconds }}
     kafkaRetries: {{ .Values.kafkaRetries }}
     logLevel: {{ .Values.logLevel | quote }}
+    logFormat: {{ .Values.logFormat | default "text" | quote }}
+    {{- if .Values.metricAllowlist }}
+    metricAllowlist:
+    {{- range .Values.metricAllowlist }}
+      - {{ . | quote }}
+    {{- end }}
+    {{- else if .Values.metricWhitelist }}
     metricWhitelist:
     {{- range .Values.metricWhitelist }}
       - {{ . | quote }}
+    {{- end }}
     {{- end }}
     clusters:
     {{- if .Values.clusters }}
     {{- range $cluster := .Values.clusters }}
       - name: {{ $cluster.name | quote }}
         bootstrapBrokers: {{ $cluster.bootstrapBrokers | quote }}
-        {{- if $cluster.groupWhitelist }}
+        {{- if $cluster.groupAllowlist }}
+        groupAllowlist:
+        {{- range $cluster.groupAllowlist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- else if $cluster.groupWhitelist }}
         groupWhitelist:
         {{- range $cluster.groupWhitelist }}
           - {{ . | quote }}
         {{- end }}
         {{- end }}
-        {{- if $cluster.groupBlacklist }}
+        {{- if $cluster.groupDenylist }}
+        groupDenylist:
+        {{- range $cluster.groupDenylist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- else if $cluster.groupBlacklist }}
         groupBlacklist:
         {{- range $cluster.groupBlacklist }}
           - {{ . | quote }}
         {{- end }}
         {{- end }}
-        {{- if $cluster.topicWhitelist }}
+        {{- if $cluster.topicAllowlist }}
+        topicAllowlist:
+        {{- range $cluster.topicAllowlist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- else if $cluster.topicWhitelist }}
         topicWhitelist:
         {{- range $cluster.topicWhitelist }}
           - {{ . | quote }}
         {{- end }}
         {{- end }}
-        {{- if $cluster.topicBlacklist }}
+        {{- if $cluster.topicDenylist }}
+        topicDenylist:
+        {{- range $cluster.topicDenylist }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- else if $cluster.topicBlacklist }}
         topicBlacklist:
         {{- range $cluster.topicBlacklist }}
           - {{ . | quote }}

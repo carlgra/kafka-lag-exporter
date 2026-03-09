@@ -54,10 +54,14 @@ type PrometheusSink struct {
 	droppedSeries     prometheus.Counter
 
 	// Self-instrumentation.
-	pollsTotal    prometheus.Counter
-	pollErrors    prometheus.Counter
-	pollDuration  prometheus.Gauge
-	lookupEntries *prometheus.GaugeVec
+	pollsTotal       prometheus.Counter
+	pollErrors       prometheus.Counter
+	pollDuration     prometheus.Gauge
+	lookupEntries    *prometheus.GaugeVec
+	clientConnects   *prometheus.GaugeVec
+	clientDisconnects *prometheus.GaugeVec
+	clientWriteErrors *prometheus.GaugeVec
+	clientReadErrors  *prometheus.GaugeVec
 }
 
 // NewPrometheusSink creates and starts a Prometheus HTTP endpoint on the given port.
@@ -100,13 +104,31 @@ func NewPrometheusSink(port int, bindAddress string, maxTimeSeries int, filter *
 		Help: "Total number of time series dropped due to cardinality limit",
 	})
 
+	// Client connection metrics.
+	clientConnects := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kafka_lag_exporter_client_connects_total",
+		Help: "Total number of successful broker connections",
+	}, []string{"cluster_name"})
+	clientDisconnects := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kafka_lag_exporter_client_disconnects_total",
+		Help: "Total number of broker disconnections",
+	}, []string{"cluster_name"})
+	clientWriteErrors := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kafka_lag_exporter_client_write_errors_total",
+		Help: "Total number of write errors to brokers",
+	}, []string{"cluster_name"})
+	clientReadErrors := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kafka_lag_exporter_client_read_errors_total",
+		Help: "Total number of read errors from brokers",
+	}, []string{"cluster_name"})
+
 	// Build info metric.
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "kafka_lag_exporter_build_info",
 		Help: "Build information",
 	}, []string{"version", "goversion"})
 
-	for _, c := range []prometheus.Collector{pollsTotal, pollErrors, pollDuration, lookupEntries, droppedSeries, buildInfo} {
+	for _, c := range []prometheus.Collector{pollsTotal, pollErrors, pollDuration, lookupEntries, droppedSeries, clientConnects, clientDisconnects, clientWriteErrors, clientReadErrors, buildInfo} {
 		if err := reg.Register(c); err != nil {
 			return nil, fmt.Errorf("registering self-instrumentation metric: %w", err)
 		}
@@ -120,12 +142,16 @@ func NewPrometheusSink(port int, bindAddress string, maxTimeSeries int, filter *
 		gauges:        gauges,
 		filter:        filter,
 		logger:        logger,
-		maxTimeSeries: maxTimeSeries,
-		pollsTotal:    pollsTotal,
-		pollErrors:    pollErrors,
-		pollDuration:  pollDuration,
-		lookupEntries: lookupEntries,
-		droppedSeries: droppedSeries,
+		maxTimeSeries:     maxTimeSeries,
+		pollsTotal:        pollsTotal,
+		pollErrors:        pollErrors,
+		pollDuration:      pollDuration,
+		lookupEntries:     lookupEntries,
+		droppedSeries:     droppedSeries,
+		clientConnects:    clientConnects,
+		clientDisconnects: clientDisconnects,
+		clientWriteErrors: clientWriteErrors,
+		clientReadErrors:  clientReadErrors,
 	}
 
 	mux := http.NewServeMux()
@@ -193,6 +219,14 @@ func (s *PrometheusSink) ReportPollMetrics(duration time.Duration, success bool)
 // ReportLookupTableSize records the size of a lookup table.
 func (s *PrometheusSink) ReportLookupTableSize(cluster, topic, partition string, size int64) {
 	s.lookupEntries.WithLabelValues(cluster, topic, partition).Set(float64(size))
+}
+
+// ReportClientMetrics records Kafka client connection statistics.
+func (s *PrometheusSink) ReportClientMetrics(clusterName string, connects, disconnects, writeErrors, readErrors int64) {
+	s.clientConnects.WithLabelValues(clusterName).Set(float64(connects))
+	s.clientDisconnects.WithLabelValues(clusterName).Set(float64(disconnects))
+	s.clientWriteErrors.WithLabelValues(clusterName).Set(float64(writeErrors))
+	s.clientReadErrors.WithLabelValues(clusterName).Set(float64(readErrors))
 }
 
 func (s *PrometheusSink) Report(_ context.Context, m metrics.MetricValue) {

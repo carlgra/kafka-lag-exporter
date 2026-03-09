@@ -36,9 +36,10 @@ type Client interface {
 
 // FranzClient implements Client using franz-go.
 type FranzClient struct {
-	admin  *kadm.Client
-	client *kgo.Client
-	logger *slog.Logger
+	admin   *kadm.Client
+	client  *kgo.Client
+	logger  *slog.Logger
+	metrics *ClientMetrics
 }
 
 // NewFranzClient creates a new Kafka client using franz-go for the given cluster config.
@@ -79,6 +80,9 @@ func NewFranzClient(clusterCfg config.ClusterConfig, globalCfg *config.Config, l
 		logger.Info("SASL configured", "cluster", clusterCfg.Name, "mechanism", mechanism)
 	}
 
+	clientMetrics := &ClientMetrics{}
+	opts = append(opts, kgo.WithHooks(clientMetrics))
+
 	client, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating kafka client for cluster %s: %w", clusterCfg.Name, err)
@@ -88,9 +92,10 @@ func NewFranzClient(clusterCfg config.ClusterConfig, globalCfg *config.Config, l
 	admin.SetTimeoutMillis(int32(timeout / time.Millisecond))
 
 	return &FranzClient{
-		admin:  admin,
-		client: client,
-		logger: logger.With("cluster", clusterCfg.Name),
+		admin:   admin,
+		client:  client,
+		logger:  logger.With("cluster", clusterCfg.Name),
+		metrics: clientMetrics,
 	}, nil
 }
 
@@ -312,6 +317,11 @@ func (c *FranzClient) GetLatestOffsets(ctx context.Context, now int64, tps []dom
 	})
 
 	return offsets, nil
+}
+
+// ClientMetrics returns Kafka client connection statistics.
+func (c *FranzClient) ClientMetrics() (connects, disconnects, writeErrors, readErrors int64) {
+	return c.metrics.Connects(), c.metrics.Disconnects(), c.metrics.WriteErrors(), c.metrics.ReadErrors()
 }
 
 func (c *FranzClient) Close() {

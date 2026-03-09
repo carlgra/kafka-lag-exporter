@@ -17,12 +17,14 @@ type Config struct {
 	ClientGroupID             string          `mapstructure:"clientGroupId"`
 	KafkaClientTimeoutSeconds int             `mapstructure:"kafkaClientTimeoutSeconds"`
 	KafkaRetries              int             `mapstructure:"kafkaRetries"`
-	MetricWhitelist           []string        `mapstructure:"metricWhitelist"`
+	MetricAllowlist           []string        `mapstructure:"metricAllowlist"`
+	MetricWhitelist           []string        `mapstructure:"metricWhitelist"` // Deprecated: use metricAllowlist
 	Clusters                  []ClusterConfig `mapstructure:"clusters"`
 	Watchers                  WatcherConfig   `mapstructure:"watchers"`
 	Lookup                    LookupConfig    `mapstructure:"lookup"`
 	Sinks                     SinksConfig     `mapstructure:"sinks"`
 	LogLevel                  string          `mapstructure:"logLevel"`
+	LogFormat                 string          `mapstructure:"logFormat"`
 }
 
 // PollInterval returns the poll interval as a duration.
@@ -39,10 +41,14 @@ func (c *Config) KafkaClientTimeout() time.Duration {
 type ClusterConfig struct {
 	Name                  string            `mapstructure:"name"`
 	BootstrapBrokers      string            `mapstructure:"bootstrapBrokers"`
-	GroupWhitelist        []string          `mapstructure:"groupWhitelist"`
-	GroupBlacklist        []string          `mapstructure:"groupBlacklist"`
-	TopicWhitelist        []string          `mapstructure:"topicWhitelist"`
-	TopicBlacklist        []string          `mapstructure:"topicBlacklist"`
+	GroupAllowlist        []string          `mapstructure:"groupAllowlist"`
+	GroupDenylist         []string          `mapstructure:"groupDenylist"`
+	TopicAllowlist        []string          `mapstructure:"topicAllowlist"`
+	TopicDenylist         []string          `mapstructure:"topicDenylist"`
+	GroupWhitelist        []string          `mapstructure:"groupWhitelist"`  // Deprecated: use groupAllowlist
+	GroupBlacklist        []string          `mapstructure:"groupBlacklist"`  // Deprecated: use groupDenylist
+	TopicWhitelist        []string          `mapstructure:"topicWhitelist"`  // Deprecated: use topicAllowlist
+	TopicBlacklist        []string          `mapstructure:"topicBlacklist"`  // Deprecated: use topicDenylist
 	Labels                map[string]string `mapstructure:"labels"`
 	ConsumerProperties    map[string]string `mapstructure:"consumerProperties"`
 	AdminClientProperties map[string]string `mapstructure:"adminClientProperties"`
@@ -134,6 +140,8 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	mergeDeprecatedNames(&cfg)
+
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
@@ -141,13 +149,42 @@ func Load(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
+// mergeDeprecatedNames merges deprecated whitelist/blacklist config fields into
+// their allowlist/denylist equivalents. The new names take precedence if both are set.
+func mergeDeprecatedNames(cfg *Config) {
+	if len(cfg.MetricAllowlist) == 0 && len(cfg.MetricWhitelist) > 0 {
+		cfg.MetricAllowlist = cfg.MetricWhitelist
+	}
+	// Apply default if neither is set.
+	if len(cfg.MetricAllowlist) == 0 {
+		cfg.MetricAllowlist = []string{".*"}
+	}
+	for i := range cfg.Clusters {
+		c := &cfg.Clusters[i]
+		if len(c.GroupAllowlist) == 0 && len(c.GroupWhitelist) > 0 {
+			c.GroupAllowlist = c.GroupWhitelist
+		}
+		if len(c.GroupDenylist) == 0 && len(c.GroupBlacklist) > 0 {
+			c.GroupDenylist = c.GroupBlacklist
+		}
+		if len(c.TopicAllowlist) == 0 && len(c.TopicWhitelist) > 0 {
+			c.TopicAllowlist = c.TopicWhitelist
+		}
+		if len(c.TopicDenylist) == 0 && len(c.TopicBlacklist) > 0 {
+			c.TopicDenylist = c.TopicBlacklist
+		}
+	}
+}
+
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("pollIntervalSeconds", 30)
 	v.SetDefault("clientGroupId", "kafkalagexporter")
 	v.SetDefault("kafkaClientTimeoutSeconds", 10)
 	v.SetDefault("kafkaRetries", 0)
-	v.SetDefault("metricWhitelist", []string{".*"})
+	// Note: metricAllowlist default is handled in mergeDeprecatedNames
+	// to allow metricWhitelist backward compatibility to work correctly.
 	v.SetDefault("logLevel", "INFO")
+	v.SetDefault("logFormat", "text")
 
 	// Lookup defaults.
 	v.SetDefault("lookup.memory.size", 60)
@@ -193,6 +230,7 @@ func bindEnvVars(v *viper.Viper) {
 	_ = v.BindEnv("kafkaClientTimeoutSeconds", "KAFKA_LAG_EXPORTER_KAFKA_CLIENT_TIMEOUT_SECONDS")
 	_ = v.BindEnv("kafkaRetries", "KAFKA_LAG_EXPORTER_KAFKA_RETRIES")
 	_ = v.BindEnv("watchers.strimzi", "KAFKA_LAG_EXPORTER_STRIMZI")
+	_ = v.BindEnv("logFormat", "KAFKA_LAG_EXPORTER_LOG_FORMAT")
 }
 
 // ParseRetentionDuration parses a duration string like "1d", "12h", "30m".

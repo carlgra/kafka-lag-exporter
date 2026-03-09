@@ -178,8 +178,8 @@ func TestCollector_SinglePollCycle(t *testing.T) {
 func TestCollector_GroupFiltering(t *testing.T) {
 	clusterCfg := config.ClusterConfig{
 		Name:           "test-cluster",
-		GroupWhitelist: []string{"^allowed.*"},
-		GroupBlacklist: []string{"^denied.*"},
+		GroupAllowlist: []string{"^allowed.*"},
+		GroupDenylist:  []string{"^denied.*"},
 	}
 
 	mock := &mockClient{
@@ -439,8 +439,8 @@ func TestCollector_EvictRemovedGroupAggregates(t *testing.T) {
 func TestCollector_TopicFiltering(t *testing.T) {
 	clusterCfg := config.ClusterConfig{
 		Name:           "test-cluster",
-		TopicWhitelist: []string{"^allowed-.*"},
-		TopicBlacklist: []string{"^allowed-internal.*"},
+		TopicAllowlist: []string{"^allowed-.*"},
+		TopicDenylist:  []string{"^allowed-internal.*"},
 	}
 
 	mock := &mockClient{
@@ -476,8 +476,8 @@ func TestCollector_TopicFiltering(t *testing.T) {
 func TestCollector_CombinedGroupAndTopicFiltering(t *testing.T) {
 	clusterCfg := config.ClusterConfig{
 		Name:           "test-cluster",
-		GroupWhitelist: []string{"^app-.*"},
-		TopicWhitelist: []string{"^events-.*"},
+		GroupAllowlist: []string{"^app-.*"},
+		TopicAllowlist: []string{"^events-.*"},
 	}
 
 	mock := &mockClient{
@@ -510,10 +510,10 @@ func TestCollector_CombinedGroupAndTopicFiltering(t *testing.T) {
 	assert.Equal(t, "events-orders", filteredGTPs[0].Topic)
 }
 
-func TestCollector_BlacklistOnly(t *testing.T) {
+func TestCollector_DenylistOnly(t *testing.T) {
 	clusterCfg := config.ClusterConfig{
-		Name:           "test",
-		GroupBlacklist: []string{"^__.*"}, // filter internal groups
+		Name:          "test",
+		GroupDenylist: []string{"^__.*"}, // filter internal groups
 	}
 
 	c, err := NewCollector(
@@ -549,7 +549,7 @@ func TestCollector_NoFilters(t *testing.T) {
 func TestCollector_InvalidFilterPattern(t *testing.T) {
 	clusterCfg := config.ClusterConfig{
 		Name:           "test",
-		GroupWhitelist: []string{"[invalid"},
+		GroupAllowlist: []string{"[invalid"},
 	}
 
 	_, err := NewCollector(
@@ -558,7 +558,7 @@ func TestCollector_InvalidFilterPattern(t *testing.T) {
 		10*time.Second, slog.Default(),
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "compiling group whitelist")
+	assert.Contains(t, err.Error(), "compiling group allowlist")
 }
 
 // --- Poll error tests -------------------------------------------------------
@@ -673,6 +673,89 @@ func TestSnapshot_RemovedTPs_NilCurrent(t *testing.T) {
 		{Topic: "t1", Partition: 0}: {Offset: 100},
 	}}
 	assert.Nil(t, RemovedTopicPartitions(prev, nil))
+}
+
+// --- Client metrics reporting ------------------------------------------------
+
+type mockClientWithMetrics struct {
+	mockClient
+}
+
+func (m *mockClientWithMetrics) ClientMetrics() (connects, disconnects, writeErrors, readErrors int64) {
+	return 5, 2, 1, 3
+}
+
+type clientMetricsRecorder struct {
+	recordingSink
+	clusterName                                    string
+	connects, disconnects, writeErrors, readErrors int64
+}
+
+func (r *clientMetricsRecorder) ReportClientMetrics(cluster string, connects, disconnects, writeErrors, readErrors int64) {
+	r.clusterName = cluster
+	r.connects = connects
+	r.disconnects = disconnects
+	r.writeErrors = writeErrors
+	r.readErrors = readErrors
+}
+
+func TestCollector_ReportClientMetrics(t *testing.T) {
+	tp := domain.TopicPartition{Topic: "t1", Partition: 0}
+	gtp := domain.GroupTopicPartition{Group: "g1", Topic: "t1", Partition: 0}
+
+	mock := &mockClientWithMetrics{mockClient: mockClient{
+		groups:      []string{"g1"},
+		gtps:        []domain.GroupTopicPartition{gtp},
+		groupOff:    domain.GroupOffsets{gtp: {Offset: 10}},
+		earliestOff: domain.PartitionOffsets{tp: {Offset: 0}},
+		latestOff:   domain.PartitionOffsets{tp: {Offset: 100}},
+	}}
+
+	rec := &clientMetricsRecorder{}
+	c, err := NewCollector(
+		config.ClusterConfig{Name: "metrics-test"},
+		mock, []sink.Sink{rec},
+		func() lookup.LookupTable { return lookup.NewMemoryTable(60) },
+		10*time.Second, slog.Default(),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	c.Run(ctx)
+
+	assert.Equal(t, "metrics-test", rec.clusterName)
+	assert.Equal(t, int64(5), rec.connects)
+	assert.Equal(t, int64(2), rec.disconnects)
+	assert.Equal(t, int64(1), rec.writeErrors)
+	assert.Equal(t, int64(3), rec.readErrors)
+}
+
+func TestCollector_ReportClientMetrics_NoProvider(t *testing.T) {
+	// Regular mockClient doesn't implement ClientMetrics — should not panic.
+	tp := domain.TopicPartition{Topic: "t1", Partition: 0}
+	gtp := domain.GroupTopicPartition{Group: "g1", Topic: "t1", Partition: 0}
+
+	mock := &mockClient{
+		groups:      []string{"g1"},
+		gtps:        []domain.GroupTopicPartition{gtp},
+		groupOff:    domain.GroupOffsets{gtp: {Offset: 10}},
+		earliestOff: domain.PartitionOffsets{tp: {Offset: 0}},
+		latestOff:   domain.PartitionOffsets{tp: {Offset: 100}},
+	}
+
+	rec := &recordingSink{}
+	c, err := NewCollector(
+		config.ClusterConfig{Name: "test"},
+		mock, []sink.Sink{rec},
+		func() lookup.LookupTable { return lookup.NewMemoryTable(60) },
+		10*time.Second, slog.Default(),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	c.Run(ctx) // Should not panic.
 }
 
 // --- Negative lag clamping --------------------------------------------------

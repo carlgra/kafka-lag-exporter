@@ -13,7 +13,7 @@ Features:
 - Exports consumer group lag metrics to [Prometheus](https://prometheus.io/), [Graphite](https://graphiteapp.org/), and/or [InfluxDB](https://www.influxdata.com/)
 - Estimates consumer lag in seconds using offset-to-time interpolation
 - Auto-discovers Kafka clusters managed by [Strimzi](https://strimzi.io/) on Kubernetes
-- Supports regex-based filtering of consumer groups and topics (whitelist/blacklist)
+- Supports regex-based filtering of consumer groups and topics (allowlist/denylist)
 - Optional [Redis](https://redis.io/) persistence for the offset lookup table
 - Lightweight single binary with no JVM required
 
@@ -51,6 +51,7 @@ The original Scala project has been archived on GitHub. This Go version is a der
 - [Strimzi Kafka Cluster Watcher](#strimzi-kafka-cluster-watcher)
 - [Metric Filtering](#metric-filtering)
 - [Health Check](#health-check)
+- [Estimating Consumer Group Lag in Time](#estimating-consumer-group-lag-in-time)
 - [Required Kafka ACL Permissions](#required-kafka-acl-permissions)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -70,7 +71,7 @@ Kafka Lag Exporter exposes the following Prometheus-compatible metrics via an HT
 
 **`kafka_consumergroup_group_lag`** — Difference between the latest produced offset and the last consumed offset.
 
-**`kafka_consumergroup_group_lag_seconds`** — Estimated lag in seconds, computed via offset-to-time interpolation.
+**`kafka_consumergroup_group_lag_seconds`** — Estimated lag in seconds, computed via offset-to-time interpolation. See [Estimating Consumer Group Lag in Time](#estimating-consumer-group-lag-in-time) for details.
 
 Labels: `cluster_name`, `group`, `topic`, `partition`, `member_host`, `consumer_id`, `client_id`
 
@@ -234,7 +235,8 @@ Configuration is loaded from a YAML file (default: `/etc/kafka-lag-exporter/conf
 | `kafkaClientTimeoutSeconds` | `10` | Connection timeout for Kafka API calls |
 | `kafkaRetries` | `0` | Number of retries when fetching consumer groups |
 | `logLevel` | `INFO` | Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
-| `metricWhitelist` | `[".*"]` | Regex patterns for metrics to expose (see [Metric Filtering](#metric-filtering)) |
+| `logFormat` | `text` | Log output format: `text` or `json` |
+| `metricAllowlist` | `[".*"]` | Regex patterns for metrics to expose (see [Metric Filtering](#metric-filtering)) |
 | `lookup.memory.size` | `60` | Maximum entries in each partition's in-memory lookup table |
 
 ### Cluster Configuration
@@ -245,13 +247,15 @@ Defined under `clusters[]` in the config file.
 |---|---|---|---|
 | `name` | | Yes | Unique cluster name used in metric labels |
 | `bootstrapBrokers` | | Yes | Comma-delimited list of Kafka broker addresses |
-| `groupWhitelist` | `[]` | No | Regex patterns for consumer groups to monitor |
-| `groupBlacklist` | `[]` | No | Regex patterns for consumer groups to exclude |
-| `topicWhitelist` | `[]` | No | Regex patterns for topics to monitor |
-| `topicBlacklist` | `[]` | No | Regex patterns for topics to exclude |
+| `groupAllowlist` | `[]` | No | Regex patterns for consumer groups to monitor |
+| `groupDenylist` | `[]` | No | Regex patterns for consumer groups to exclude |
+| `topicAllowlist` | `[]` | No | Regex patterns for topics to monitor |
+| `topicDenylist` | `[]` | No | Regex patterns for topics to exclude |
 | `labels` | `{}` | No | Custom labels added to all metrics for this cluster |
 | `consumerProperties` | `{}` | No | Additional Kafka consumer properties (e.g., `security.protocol: SSL`) |
 | `adminClientProperties` | `{}` | No | Additional Kafka admin client properties |
+
+> **Backward Compatibility**: The deprecated field names `groupWhitelist`, `groupBlacklist`, `topicWhitelist`, `topicBlacklist`, and `metricWhitelist` are still supported. The new names take precedence if both are set.
 
 ### Redis Configuration
 
@@ -288,6 +292,7 @@ Key configuration options can be set via environment variables:
 | `KAFKA_LAG_EXPORTER_CLIENT_GROUP_ID` | `clientGroupId` |
 | `KAFKA_LAG_EXPORTER_KAFKA_CLIENT_TIMEOUT_SECONDS` | `kafkaClientTimeoutSeconds` |
 | `KAFKA_LAG_EXPORTER_STRIMZI` | `watchers.strimzi` |
+| `KAFKA_LAG_EXPORTER_LOG_FORMAT` | `logFormat` |
 
 ### Example Configuration
 
@@ -302,9 +307,9 @@ metricWhitelist:
 clusters:
   - name: production
     bootstrapBrokers: "broker-1:9092,broker-2:9092,broker-3:9092"
-    groupWhitelist:
+    groupAllowlist:
       - "^app-.*"
-    topicBlacklist:
+    topicDenylist:
       - "^__.*"
     labels:
       environment: production
@@ -377,11 +382,11 @@ This requires the exporter to run inside a Kubernetes cluster with appropriate R
 
 ## Metric Filtering
 
-Use `metricWhitelist` to control which metrics are exposed. Only metrics matching at least one regex pattern are reported.
+Use `metricAllowlist` to control which metrics are exposed. Only metrics matching at least one regex pattern are reported. The deprecated `metricWhitelist` name is still supported for backward compatibility.
 
 ```yaml
 # Only expose lag metrics and latest offset
-metricWhitelist:
+metricAllowlist:
   - "kafka_consumergroup_group_lag$"
   - "kafka_consumergroup_group_lag_seconds$"
   - "kafka_partition_latest_offset"
@@ -396,6 +401,44 @@ curl http://localhost:8000/health
 ```
 
 The `kafka_consumergroup_poll_time_ms` metric can be used to monitor polling health. If it exceeds the poll interval, the exporter may be struggling to keep up.
+
+## Estimating Consumer Group Lag in Time
+
+The `kafka_consumergroup_group_lag_seconds` metric estimates how far behind a consumer group is in wall-clock time, not just offset count. This is more meaningful than offset lag alone because message production rates vary over time.
+
+### How It Works
+
+The exporter maintains a **sliding window lookup table** of `(offset, timestamp)` pairs for each topic-partition. On every poll cycle, it records the latest partition offset and the time it was observed. Over time, this builds a history of offset progression.
+
+When computing time lag for a consumer group's committed offset:
+
+1. **Find surrounding points**: The lookup table finds two points that bracket the consumer's committed offset — one below and one above.
+2. **Interpolate**: Using linear interpolation between these two points, it estimates the wall-clock time when the consumer's current offset was the latest offset.
+3. **Compute lag**: `lag_seconds = (current_time - estimated_time) / 1000`
+
+### Edge Cases
+
+| Scenario | Behavior |
+|---|---|
+| **Fewer than 2 points** in lookup table | Returns `NaN` (metric not reported). Happens on startup before enough data is collected. |
+| **Consumer offset at or beyond latest** | Lag is 0 seconds (consumer is caught up). |
+| **Consumer offset below all stored points** | Extrapolates from the oldest and newest points. May produce large values for reprocessing consumers. |
+| **Negative lag** (race condition) | Returns `NaN`. Can occur when offset and time are collected at slightly different moments. |
+| **Flat-line partition** (no new messages) | Timestamp of existing point is updated but no new point is added, preventing stale time estimates. |
+| **All partitions return NaN** | The `kafka_consumergroup_group_max_lag_seconds` aggregate is not reported (instead of misleadingly reporting 0). |
+
+### Lookup Table Configuration
+
+The sliding window size determines how many historical points are kept per partition:
+
+- **In-memory** (default): `lookup.memory.size: 60` — keeps the last 60 observations per partition
+- **Redis**: Provides persistence across restarts with configurable retention and TTL
+
+A larger window provides more accurate interpolation but uses more memory. The default of 60 points at a 30-second poll interval gives ~30 minutes of history.
+
+### Astronomical Lag Values
+
+If a consumer group reprocesses a topic from the beginning, the time lag can appear very large because the lookup table only has recent offset-to-time mappings. The exporter extrapolates backwards, which can produce values of hours or days. This is expected behavior — the consumer genuinely is that far behind in wall-clock time. The lag value will decrease as the consumer catches up.
 
 ## Required Kafka ACL Permissions
 

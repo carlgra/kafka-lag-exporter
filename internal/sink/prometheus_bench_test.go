@@ -11,7 +11,7 @@ import (
 func BenchmarkPrometheusSink_Report(b *testing.B) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
 	if err != nil {
 		b.Fatal(err)
 	}

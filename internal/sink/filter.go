@@ -2,7 +2,7 @@ package sink
 
 import "regexp"
 
-// MetricFilter determines if a metric should be reported based on whitelist patterns.
+// MetricFilter determines if a metric should be reported based on allowlist patterns.
 type MetricFilter struct {
 	patterns []*regexp.Regexp
 }
@@ -22,7 +22,7 @@ func NewMetricFilter(patterns []string) (*MetricFilter, error) {
 	return &MetricFilter{patterns: compiled}, nil
 }
 
-// Matches returns true if the metric name matches any whitelist pattern.
+// Matches returns true if the metric name matches any allowlist pattern.
 func (f *MetricFilter) Matches(metricName string) bool {
 	for _, re := range f.patterns {
 		if re.MatchString(metricName) {

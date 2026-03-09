@@ -1,17 +1,26 @@
+## Number of replicas. Only 1 is recommended unless using Redis lookup tables,
+## as multiple replicas without shared state will produce duplicate metrics.
+replicaCount: 1
+
 ## Statically define one or more cluster
 clusters: {}
 ## Ex)
 #clusters:
 #  - name: "default"
 #    bootstrapBrokers: "simple-strimzi-kafka-bootstrap.strimzi.svc.cluster.local:9092"
-#    topicWhitelist:
+#    topicAllowlist:
 #    - "^xyz-corp-topics\\..+"
-#    topicBlacklist:
+#    topicDenylist:
 #    - "^unmonitored-topics-.+"
-#    groupWhitelist:
+#    groupAllowlist:
 #    - "^analytics-app-.+"
-#    groupBlacklist:
+#    groupDenylist:
 #    - "^unmonitored-groups-.+"
+#    ## Deprecated: use topicAllowlist/topicDenylist/groupAllowlist/groupDenylist instead
+#    # topicWhitelist: []
+#    # topicBlacklist: []
+#    # groupWhitelist: []
+#    # groupBlacklist: []
 #    consumerProperties:
 #      security.protocol: SSL
 #    adminClientProperties:
@@ -93,21 +102,27 @@ watchers:
 ## Applicable only in non-Strimzi installation. If true, a service account will be created and bind to the deployment.
 ## Otherwise, the default service account for the namespace will be used.
 serviceAccount:
+  ## Set to true to create a new ServiceAccount
   create: false
-  ## The name of the service account will be generated based on the release name, use nameOverride to override
-  ## with a static name.
+  ## Use an existing ServiceAccount by name (overrides generated name and skips creation)
+  # existingName: my-existing-serviceaccount
+  ## Deprecated: use existingName instead
   # nameOverride: my-serviceaccount
   ## Annotations to add to the service account
   # annotations:
   #     iam.gke.io/gcp-service-account: gke-workload@my-gcp-project.iam.gserviceaccount.com
 
 ## You can use regex to control the metrics exposed by Prometheus endpoint.
-## Any metric that matches one of the regex in the whitelist will be exposed.
-metricWhitelist:
+## Any metric that matches one of the regex in the allowlist will be exposed.
+## Deprecated: metricWhitelist is still supported for backward compatibility.
+metricAllowlist:
   - .*
 
 ## The log level of the application (DEBUG, INFO, WARN, ERROR)
 logLevel: INFO
+
+## The log format of the application (text, json)
+logFormat: text
 
 ## Additional labels to add to all resources
 additionalLabels: #{}
@@ -183,6 +198,17 @@ prometheus:
   serviceMonitor:
     enabled: false
     interval: "30s"
+    ## Scrape timeout
+    # scrapeTimeout: "10s"
+    ## Additional labels for the ServiceMonitor
+    # additionalLabels: {}
+    ## Namespace for the ServiceMonitor (defaults to release namespace)
+    # namespace: ""
+    ## honorLabels controls whether Prometheus should respect labels from the scraped target
+    honorLabels: false
+    ## Additional endpoint configuration
+    # metricRelabelings: []
+    # relabelings: []
 
 # Allow alert rules to be configured for Prometheus Alertmanager
 prometheusRule:
