@@ -18,13 +18,14 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "kafkalagexporter", cfg.ClientGroupID)
 	assert.Equal(t, 10, cfg.KafkaClientTimeoutSeconds)
 	assert.Equal(t, 0, cfg.KafkaRetries)
-	assert.Equal(t, []string{".*"}, cfg.MetricWhitelist)
+	assert.Equal(t, []string{".*"}, cfg.MetricAllowlist)
 	assert.Equal(t, 60, cfg.Lookup.Memory.Size)
 	assert.True(t, cfg.Sinks.Prometheus.Enabled)
 	assert.Equal(t, 8000, cfg.Sinks.Prometheus.Port)
 	assert.False(t, cfg.Sinks.Graphite.Enabled)
 	assert.False(t, cfg.Sinks.InfluxDB.Enabled)
 	assert.False(t, cfg.Watchers.Strimzi)
+	assert.Equal(t, "text", cfg.LogFormat)
 }
 
 func TestLoad_FromFile(t *testing.T) {
@@ -36,12 +37,12 @@ pollIntervalSeconds: 15
 clientGroupId: "test-group"
 kafkaClientTimeoutSeconds: 5
 kafkaRetries: 3
-metricWhitelist:
+metricAllowlist:
   - "kafka_consumergroup.*"
 clusters:
   - name: "test-cluster"
     bootstrapBrokers: "localhost:9092"
-    groupWhitelist:
+    groupAllowlist:
       - "^test.*"
     labels:
       env: "test"
@@ -59,6 +60,7 @@ sinks:
     prefix: "kafka"
 watchers:
   strimzi: true
+logFormat: json
 `
 	require.NoError(t, os.WriteFile(configFile, []byte(content), 0644))
 
@@ -69,12 +71,12 @@ watchers:
 	assert.Equal(t, "test-group", cfg.ClientGroupID)
 	assert.Equal(t, 5, cfg.KafkaClientTimeoutSeconds)
 	assert.Equal(t, 3, cfg.KafkaRetries)
-	assert.Equal(t, []string{"kafka_consumergroup.*"}, cfg.MetricWhitelist)
+	assert.Equal(t, []string{"kafka_consumergroup.*"}, cfg.MetricAllowlist)
 
 	require.Len(t, cfg.Clusters, 1)
 	assert.Equal(t, "test-cluster", cfg.Clusters[0].Name)
 	assert.Equal(t, "localhost:9092", cfg.Clusters[0].BootstrapBrokers)
-	assert.Equal(t, []string{"^test.*"}, cfg.Clusters[0].GroupWhitelist)
+	assert.Equal(t, []string{"^test.*"}, cfg.Clusters[0].GroupAllowlist)
 	assert.Equal(t, "test", cfg.Clusters[0].Labels["env"])
 
 	assert.Equal(t, 120, cfg.Lookup.Memory.Size)
@@ -82,6 +84,62 @@ watchers:
 	assert.True(t, cfg.Sinks.Graphite.Enabled)
 	assert.Equal(t, "graphite.local", cfg.Sinks.Graphite.Host)
 	assert.True(t, cfg.Watchers.Strimzi)
+	assert.Equal(t, "json", cfg.LogFormat)
+}
+
+func TestLoad_BackwardCompatibility(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+
+	content := `
+clusters:
+  - name: "compat-cluster"
+    bootstrapBrokers: "localhost:9092"
+    groupWhitelist:
+      - "^old-group.*"
+    groupBlacklist:
+      - "^exclude.*"
+    topicWhitelist:
+      - "^old-topic.*"
+    topicBlacklist:
+      - "^skip.*"
+metricWhitelist:
+  - "kafka_consumergroup.*"
+`
+	require.NoError(t, os.WriteFile(configFile, []byte(content), 0644))
+
+	cfg, err := Load(configFile)
+	require.NoError(t, err)
+
+	// Old names should be merged into new names.
+	assert.Equal(t, []string{"kafka_consumergroup.*"}, cfg.MetricAllowlist)
+	require.Len(t, cfg.Clusters, 1)
+	assert.Equal(t, []string{"^old-group.*"}, cfg.Clusters[0].GroupAllowlist)
+	assert.Equal(t, []string{"^exclude.*"}, cfg.Clusters[0].GroupDenylist)
+	assert.Equal(t, []string{"^old-topic.*"}, cfg.Clusters[0].TopicAllowlist)
+	assert.Equal(t, []string{"^skip.*"}, cfg.Clusters[0].TopicDenylist)
+}
+
+func TestLoad_NewNamesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+
+	content := `
+clusters:
+  - name: "test"
+    bootstrapBrokers: "localhost:9092"
+    groupAllowlist:
+      - "^new.*"
+    groupWhitelist:
+      - "^old.*"
+`
+	require.NoError(t, os.WriteFile(configFile, []byte(content), 0644))
+
+	cfg, err := Load(configFile)
+	require.NoError(t, err)
+
+	// New names should take precedence.
+	assert.Equal(t, []string{"^new.*"}, cfg.Clusters[0].GroupAllowlist)
 }
 
 func TestLoad_EnvOverrides(t *testing.T) {
@@ -89,6 +147,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("KAFKA_LAG_EXPORTER_PORT", "9999")
 	t.Setenv("KAFKA_LAG_EXPORTER_LOOKUP_TABLE_SIZE", "200")
 	t.Setenv("KAFKA_LAG_EXPORTER_CLIENT_GROUP_ID", "env-group")
+	t.Setenv("KAFKA_LAG_EXPORTER_LOG_FORMAT", "json")
 
 	cfg, err := Load("")
 	require.NoError(t, err)
@@ -97,6 +156,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	assert.Equal(t, 9999, cfg.Sinks.Prometheus.Port)
 	assert.Equal(t, 200, cfg.Lookup.Memory.Size)
 	assert.Equal(t, "env-group", cfg.ClientGroupID)
+	assert.Equal(t, "json", cfg.LogFormat)
 }
 
 func TestLoad_ValidationErrors(t *testing.T) {

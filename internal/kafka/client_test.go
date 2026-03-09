@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 func TestMergeProperties_BothNil(t *testing.T) {
@@ -148,4 +149,64 @@ func TestBuildTLSConfig_InvalidCACert(t *testing.T) {
 
 func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// --- ClientMetrics tests ----------------------------------------------------
+
+func TestClientMetrics_OnBrokerConnect_Success(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerConnect(kgo.BrokerMetadata{}, 0, nil, nil)
+	assert.Equal(t, int64(1), m.Connects())
+}
+
+func TestClientMetrics_OnBrokerConnect_Error(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerConnect(kgo.BrokerMetadata{}, 0, nil, assert.AnError)
+	assert.Equal(t, int64(0), m.Connects())
+}
+
+func TestClientMetrics_OnBrokerDisconnect(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerDisconnect(kgo.BrokerMetadata{}, nil)
+	m.OnBrokerDisconnect(kgo.BrokerMetadata{}, nil)
+	assert.Equal(t, int64(2), m.Disconnects())
+}
+
+func TestClientMetrics_OnBrokerWrite_Success(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerWrite(kgo.BrokerMetadata{}, 0, 100, 0, 0, nil)
+	assert.Equal(t, int64(0), m.WriteErrors())
+}
+
+func TestClientMetrics_OnBrokerWrite_Error(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerWrite(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
+	assert.Equal(t, int64(1), m.WriteErrors())
+}
+
+func TestClientMetrics_OnBrokerRead_Success(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerRead(kgo.BrokerMetadata{}, 0, 100, 0, 0, nil)
+	assert.Equal(t, int64(0), m.ReadErrors())
+}
+
+func TestClientMetrics_OnBrokerRead_Error(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerRead(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
+	assert.Equal(t, int64(1), m.ReadErrors())
+}
+
+func TestClientMetrics_AllCounters(t *testing.T) {
+	m := &ClientMetrics{}
+	m.OnBrokerConnect(kgo.BrokerMetadata{}, 0, nil, nil)
+	m.OnBrokerConnect(kgo.BrokerMetadata{}, 0, nil, nil)
+	m.OnBrokerDisconnect(kgo.BrokerMetadata{}, nil)
+	m.OnBrokerWrite(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
+	m.OnBrokerRead(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
+	m.OnBrokerRead(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
+
+	assert.Equal(t, int64(2), m.Connects())
+	assert.Equal(t, int64(1), m.Disconnects())
+	assert.Equal(t, int64(1), m.WriteErrors())
+	assert.Equal(t, int64(2), m.ReadErrors())
 }

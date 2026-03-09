@@ -284,6 +284,30 @@ func TestPrometheusSink_ReportLookupTableSize(t *testing.T) {
 	assert.Contains(t, bodyStr, "42")
 }
 
+func TestPrometheusSink_ReportClientMetrics(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	sink.ReportClientMetrics("test-cluster", 10, 3, 2, 1)
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_client_connects_total")
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_client_disconnects_total")
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_client_write_errors_total")
+	assert.Contains(t, bodyStr, "kafka_lag_exporter_client_read_errors_total")
+	assert.Contains(t, bodyStr, `cluster_name="test-cluster"`)
+	assert.Contains(t, bodyStr, "10")
+}
+
 func TestPrometheusSink_CardinalityLimit(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})

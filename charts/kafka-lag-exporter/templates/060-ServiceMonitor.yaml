@@ -22,6 +22,9 @@ spec:
   endpoints:
   - port: http
     interval: {{ .Values.prometheus.serviceMonitor.interval }}
+    {{- if .Values.prometheus.serviceMonitor.honorLabels }}
+    honorLabels: {{ .Values.prometheus.serviceMonitor.honorLabels }}
+    {{- end }}
     {{- if .Values.prometheus.serviceMonitor.scrapeTimeout }}
     scrapeTimeout: {{ .Values.prometheus.serviceMonitor.scrapeTimeout }}
     {{- end }}

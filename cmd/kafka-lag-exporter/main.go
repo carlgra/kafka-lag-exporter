@@ -40,7 +40,14 @@ func main() {
 
 	// Setup logging.
 	logLevel := parseLogLevel(cfg.LogLevel)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	handlerOpts := &slog.HandlerOptions{Level: logLevel}
+	var handler slog.Handler
+	if strings.EqualFold(cfg.LogFormat, "json") {
+		handler = slog.NewJSONHandler(os.Stderr, handlerOpts)
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, handlerOpts)
+	}
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	logger.Info("kafka-lag-exporter starting",
@@ -54,9 +61,9 @@ func main() {
 	sink.SetVersion(version)
 
 	// Create metric filter.
-	filter, err := sink.NewMetricFilter(cfg.MetricWhitelist)
+	filter, err := sink.NewMetricFilter(cfg.MetricAllowlist)
 	if err != nil {
-		logger.Error("invalid metric whitelist patterns", "error", err)
+		logger.Error("invalid metric allowlist patterns", "error", err)
 		os.Exit(1)
 	}
 

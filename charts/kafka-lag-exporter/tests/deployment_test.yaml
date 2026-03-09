@@ -58,3 +58,26 @@ tests:
     asserts:
       - isNull:
           path: spec.template.spec.serviceAccountName
+
+  - it: should default to 1 replica
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: should allow configuring replicas
+    set:
+      replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: should use existingName for serviceAccount
+    set:
+      serviceAccount:
+        existingName: my-existing-sa
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: my-existing-sa

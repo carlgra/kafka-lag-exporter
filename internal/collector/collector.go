@@ -30,10 +30,10 @@ type Collector struct {
 	lookupFactory  func() lookup.LookupTable
 	pollInterval   time.Duration
 	kafkaRetries   int
-	groupWhitelist []*regexp.Regexp
-	groupBlacklist []*regexp.Regexp
-	topicWhitelist []*regexp.Regexp
-	topicBlacklist []*regexp.Regexp
+	groupAllowlist []*regexp.Regexp
+	groupDenylist  []*regexp.Regexp
+	topicAllowlist []*regexp.Regexp
+	topicDenylist  []*regexp.Regexp
 	lastSnapshot   *OffsetsSnapshot
 	logger         *slog.Logger
 
@@ -68,17 +68,17 @@ func NewCollector(
 	}
 
 	var err error
-	if c.groupWhitelist, err = compilePatterns(clusterCfg.GroupWhitelist); err != nil {
-		return nil, fmt.Errorf("compiling group whitelist: %w", err)
+	if c.groupAllowlist, err = compilePatterns(clusterCfg.GroupAllowlist); err != nil {
+		return nil, fmt.Errorf("compiling group allowlist: %w", err)
 	}
-	if c.groupBlacklist, err = compilePatterns(clusterCfg.GroupBlacklist); err != nil {
-		return nil, fmt.Errorf("compiling group blacklist: %w", err)
+	if c.groupDenylist, err = compilePatterns(clusterCfg.GroupDenylist); err != nil {
+		return nil, fmt.Errorf("compiling group denylist: %w", err)
 	}
-	if c.topicWhitelist, err = compilePatterns(clusterCfg.TopicWhitelist); err != nil {
-		return nil, fmt.Errorf("compiling topic whitelist: %w", err)
+	if c.topicAllowlist, err = compilePatterns(clusterCfg.TopicAllowlist); err != nil {
+		return nil, fmt.Errorf("compiling topic allowlist: %w", err)
 	}
-	if c.topicBlacklist, err = compilePatterns(clusterCfg.TopicBlacklist); err != nil {
-		return nil, fmt.Errorf("compiling topic blacklist: %w", err)
+	if c.topicDenylist, err = compilePatterns(clusterCfg.TopicDenylist); err != nil {
+		return nil, fmt.Errorf("compiling topic denylist: %w", err)
 	}
 
 	return c, nil
@@ -161,6 +161,7 @@ func (c *Collector) poll(ctx context.Context) {
 	// Report self-instrumentation and lookup table sizes.
 	c.reportPollInstrumentation(elapsed, true)
 	c.reportLookupTableSizes()
+	c.reportClientMetrics()
 }
 
 // reportPollInstrumentation sends poll metrics to any PrometheusSink.
@@ -185,6 +186,25 @@ func (c *Collector) reportLookupTableSizes() {
 		}
 		for tp, table := range c.lookupTables {
 			ps.ReportLookupTableSize(c.clusterName, tp.Topic, fmt.Sprintf("%d", tp.Partition), table.Length())
+		}
+	}
+}
+
+// reportClientMetrics sends Kafka client connection metrics to any PrometheusSink.
+func (c *Collector) reportClientMetrics() {
+	type metricsProvider interface {
+		ClientMetrics() (connects, disconnects, writeErrors, readErrors int64)
+	}
+	mp, ok := c.client.(metricsProvider)
+	if !ok {
+		return
+	}
+	connects, disconnects, writeErrors, readErrors := mp.ClientMetrics()
+	for _, s := range c.sinks {
+		if ps, ok := s.(interface {
+			ReportClientMetrics(string, int64, int64, int64, int64)
+		}); ok {
+			ps.ReportClientMetrics(c.clusterName, connects, disconnects, writeErrors, readErrors)
 		}
 	}
 }
@@ -226,9 +246,19 @@ func (c *Collector) tryCollectOffsets(ctx context.Context, now int64) (*OffsetsS
 	groups = c.filterGroups(groups)
 	gtps = c.filterGTPs(gtps)
 
-	// Collect all unique topic-partitions from GTPs.
+	// Fetch group offsets first so we can discover all topic-partitions,
+	// including those with committed offsets but no active member assignment.
+	groupOffsets, err := c.client.GetGroupOffsets(ctx, now, groups, gtps)
+	if err != nil {
+		return nil, fmt.Errorf("fetching group offsets: %w", err)
+	}
+
+	// Collect all unique topic-partitions from both GTPs and committed offsets.
 	tpSet := make(map[domain.TopicPartition]bool)
 	for _, gtp := range gtps {
+		tpSet[gtp.TopicPartition()] = true
+	}
+	for gtp := range groupOffsets {
 		tpSet[gtp.TopicPartition()] = true
 	}
 	var tps []domain.TopicPartition
@@ -239,20 +269,13 @@ func (c *Collector) tryCollectOffsets(ctx context.Context, now int64) (*OffsetsS
 	// Filter topics.
 	tps = c.filterTopicPartitions(tps)
 
-	// Fetch offsets concurrently.
+	// Fetch earliest and latest offsets concurrently.
 	var (
-		groupOffsets    domain.GroupOffsets
 		earliestOffsets domain.PartitionOffsets
 		latestOffsets   domain.PartitionOffsets
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		var err error
-		groupOffsets, err = c.client.GetGroupOffsets(gctx, now, groups, gtps)
-		return err
-	})
 
 	g.Go(func() error {
 		var err error
@@ -271,7 +294,7 @@ func (c *Collector) tryCollectOffsets(ctx context.Context, now int64) (*OffsetsS
 	}
 
 	return &OffsetsSnapshot{
-		Timestamp:       now,
+		Timestamp:      now,
 		GroupOffsets:    groupOffsets,
 		EarliestOffsets: earliestOffsets,
 		LatestOffsets:   latestOffsets,
@@ -342,6 +365,7 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 
 	maxLag := make(map[groupKey]float64)
 	maxLagSeconds := make(map[groupKey]float64)
+	hasLagSeconds := make(map[groupKey]bool)
 	sumLag := make(map[groupKey]float64)
 	topicSumLag := make(map[groupTopicKey]float64)
 
@@ -414,8 +438,11 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 		if lagF > maxLag[gk] {
 			maxLag[gk] = lagF
 		}
-		if !math.IsNaN(lagSeconds) && lagSeconds > maxLagSeconds[gk] {
-			maxLagSeconds[gk] = lagSeconds
+		if !math.IsNaN(lagSeconds) {
+			if !hasLagSeconds[gk] || lagSeconds > maxLagSeconds[gk] {
+				maxLagSeconds[gk] = lagSeconds
+				hasLagSeconds[gk] = true
+			}
 		}
 	}
 
@@ -428,6 +455,9 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 		})
 	}
 	for gk, v := range maxLagSeconds {
+		if !hasLagSeconds[gk] {
+			continue
+		}
 		result = append(result, metrics.MetricValue{
 			Definition: metrics.GroupMaxLagSeconds,
 			Labels:     c.makeLabels("cluster_name", c.clusterName, "group", gk.group),
@@ -561,15 +591,15 @@ func matchesAny(s string, patterns []*regexp.Regexp) bool {
 }
 
 func (c *Collector) filterGroups(groups []string) []string {
-	if len(c.groupWhitelist) == 0 && len(c.groupBlacklist) == 0 {
+	if len(c.groupAllowlist) == 0 && len(c.groupDenylist) == 0 {
 		return groups
 	}
 	var filtered []string
 	for _, g := range groups {
-		if len(c.groupWhitelist) > 0 && !matchesAny(g, c.groupWhitelist) {
+		if len(c.groupAllowlist) > 0 && !matchesAny(g, c.groupAllowlist) {
 			continue
 		}
-		if len(c.groupBlacklist) > 0 && matchesAny(g, c.groupBlacklist) {
+		if len(c.groupDenylist) > 0 && matchesAny(g, c.groupDenylist) {
 			continue
 		}
 		filtered = append(filtered, g)
@@ -578,22 +608,22 @@ func (c *Collector) filterGroups(groups []string) []string {
 }
 
 func (c *Collector) filterGTPs(gtps []domain.GroupTopicPartition) []domain.GroupTopicPartition {
-	if len(c.groupWhitelist) == 0 && len(c.groupBlacklist) == 0 &&
-		len(c.topicWhitelist) == 0 && len(c.topicBlacklist) == 0 {
+	if len(c.groupAllowlist) == 0 && len(c.groupDenylist) == 0 &&
+		len(c.topicAllowlist) == 0 && len(c.topicDenylist) == 0 {
 		return gtps
 	}
 	var filtered []domain.GroupTopicPartition
 	for _, gtp := range gtps {
-		if len(c.groupWhitelist) > 0 && !matchesAny(gtp.Group, c.groupWhitelist) {
+		if len(c.groupAllowlist) > 0 && !matchesAny(gtp.Group, c.groupAllowlist) {
 			continue
 		}
-		if len(c.groupBlacklist) > 0 && matchesAny(gtp.Group, c.groupBlacklist) {
+		if len(c.groupDenylist) > 0 && matchesAny(gtp.Group, c.groupDenylist) {
 			continue
 		}
-		if len(c.topicWhitelist) > 0 && !matchesAny(gtp.Topic, c.topicWhitelist) {
+		if len(c.topicAllowlist) > 0 && !matchesAny(gtp.Topic, c.topicAllowlist) {
 			continue
 		}
-		if len(c.topicBlacklist) > 0 && matchesAny(gtp.Topic, c.topicBlacklist) {
+		if len(c.topicDenylist) > 0 && matchesAny(gtp.Topic, c.topicDenylist) {
 			continue
 		}
 		filtered = append(filtered, gtp)
@@ -602,15 +632,15 @@ func (c *Collector) filterGTPs(gtps []domain.GroupTopicPartition) []domain.Group
 }
 
 func (c *Collector) filterTopicPartitions(tps []domain.TopicPartition) []domain.TopicPartition {
-	if len(c.topicWhitelist) == 0 && len(c.topicBlacklist) == 0 {
+	if len(c.topicAllowlist) == 0 && len(c.topicDenylist) == 0 {
 		return tps
 	}
 	var filtered []domain.TopicPartition
 	for _, tp := range tps {
-		if len(c.topicWhitelist) > 0 && !matchesAny(tp.Topic, c.topicWhitelist) {
+		if len(c.topicAllowlist) > 0 && !matchesAny(tp.Topic, c.topicAllowlist) {
 			continue
 		}
-		if len(c.topicBlacklist) > 0 && matchesAny(tp.Topic, c.topicBlacklist) {
+		if len(c.topicDenylist) > 0 && matchesAny(tp.Topic, c.topicDenylist) {
 			continue
 		}
 		filtered = append(filtered, tp)
