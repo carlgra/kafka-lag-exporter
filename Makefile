@@ -2,7 +2,7 @@ BINARY_NAME := kafka-lag-exporter
 DOCKER_IMAGE := seglo/kafka-lag-exporter
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-.PHONY: build test bench lint docker clean fmt vet helm-test
+.PHONY: build test bench lint docker clean fmt vet helm-test check install-hooks push
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/$(BINARY_NAME) ./cmd/kafka-lag-exporter
@@ -30,6 +30,17 @@ docker:
 
 helm-test:
 	helm unittest charts/kafka-lag-exporter
+
+check: fmt vet lint test
+	@echo "All checks passed."
+
+install-hooks:
+	cp scripts/pre-push .git/hooks/pre-push
+	chmod +x .git/hooks/pre-push
+	@echo "Git hooks installed."
+
+push: check
+	git push $(PUSH_ARGS)
 
 clean:
 	rm -rf bin/

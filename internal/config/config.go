@@ -45,10 +45,10 @@ type ClusterConfig struct {
 	GroupDenylist         []string          `mapstructure:"groupDenylist"`
 	TopicAllowlist        []string          `mapstructure:"topicAllowlist"`
 	TopicDenylist         []string          `mapstructure:"topicDenylist"`
-	GroupWhitelist        []string          `mapstructure:"groupWhitelist"`  // Deprecated: use groupAllowlist
-	GroupBlacklist        []string          `mapstructure:"groupBlacklist"`  // Deprecated: use groupDenylist
-	TopicWhitelist        []string          `mapstructure:"topicWhitelist"`  // Deprecated: use topicAllowlist
-	TopicBlacklist        []string          `mapstructure:"topicBlacklist"`  // Deprecated: use topicDenylist
+	GroupWhitelist        []string          `mapstructure:"groupWhitelist"` // Deprecated: use groupAllowlist
+	GroupBlacklist        []string          `mapstructure:"groupBlacklist"` // Deprecated: use groupDenylist
+	TopicWhitelist        []string          `mapstructure:"topicWhitelist"` // Deprecated: use topicAllowlist
+	TopicBlacklist        []string          `mapstructure:"topicBlacklist"` // Deprecated: use topicDenylist
 	Labels                map[string]string `mapstructure:"labels"`
 	ConsumerProperties    map[string]string `mapstructure:"consumerProperties"`
 	AdminClientProperties map[string]string `mapstructure:"adminClientProperties"`

@@ -1,0 +1,23 @@
+#!/bin/sh
+# Pre-push hook: run gofmt, go vet, and tests before pushing.
+#
+# Install: make install-hooks
+
+set -e
+
+echo "==> pre-push: checking gofmt..."
+UNFORMATTED=$(gofmt -l .)
+if [ -n "$UNFORMATTED" ]; then
+    echo "ERROR: Files not formatted with gofmt:"
+    echo "$UNFORMATTED"
+    echo "Run 'make fmt' to fix."
+    exit 1
+fi
+
+echo "==> pre-push: running go vet..."
+go vet ./...
+
+echo "==> pre-push: running tests..."
+go test -race -count=1 ./internal/... ./cmd/...
+
+echo "==> pre-push: all checks passed."
