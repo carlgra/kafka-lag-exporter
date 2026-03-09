@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-09
+
+### Fixed
+- Helm chart default image repository changed from `seglo/kafka-lag-exporter` to `ghcr.io/carlgra/kafka-lag-exporter`
+- Chart appVersion and image tag corrected from `1.0.0-go` to `1.0.0` to match release tags
+- Makefile Docker image target updated to GHCR
+- README Docker examples updated to correct image path
+
 ## [1.0.0] - 2026-03-09
 
 ### Added

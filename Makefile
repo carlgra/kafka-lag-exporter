@@ -1,5 +1,5 @@
 BINARY_NAME := kafka-lag-exporter
-DOCKER_IMAGE := seglo/kafka-lag-exporter
+DOCKER_IMAGE := ghcr.io/carlgra/kafka-lag-exporter
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 .PHONY: build test bench lint docker clean fmt vet helm-test check install-hooks push

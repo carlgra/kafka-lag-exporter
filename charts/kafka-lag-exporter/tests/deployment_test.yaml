@@ -6,7 +6,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "seglo/kafka-lag-exporter:1.0.0-go"
+          value: "ghcr.io/carlgra/kafka-lag-exporter:1.0.0"
 
   - it: should set resource requests and limits
     asserts:
