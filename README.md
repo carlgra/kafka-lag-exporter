@@ -132,7 +132,7 @@ make build
 
 # Or use Docker
 docker run -p 8000:8000 -v $(pwd)/config.yaml:/etc/kafka-lag-exporter/config.yaml \
-  seglo/kafka-lag-exporter:latest
+  ghcr.io/carlgra/kafka-lag-exporter:latest
 ```
 
 ## Run on Kubernetes
@@ -219,7 +219,7 @@ make build
 ```bash
 docker run -p 8000:8000 \
   -v $(pwd)/config.yaml:/etc/kafka-lag-exporter/config.yaml \
-  seglo/kafka-lag-exporter:latest
+  ghcr.io/carlgra/kafka-lag-exporter:latest
 ```
 
 ## Configuration

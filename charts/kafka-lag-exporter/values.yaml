@@ -130,8 +130,8 @@ additionalLabels: #{}
 
 ## You probably won't need to change anything below this line.
 image:
-  repository: seglo/kafka-lag-exporter
-  tag: 1.0.0-go
+  repository: ghcr.io/carlgra/kafka-lag-exporter
+  tag: "1.0.0"
   # If digest is set it will be used instead of tag to specify the image
   # digest: sha256:...
   pullPolicy: Always
