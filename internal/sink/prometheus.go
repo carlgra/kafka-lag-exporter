@@ -54,11 +54,11 @@ type PrometheusSink struct {
 	droppedSeries     prometheus.Counter
 
 	// Self-instrumentation.
-	pollsTotal       prometheus.Counter
-	pollErrors       prometheus.Counter
-	pollDuration     prometheus.Gauge
-	lookupEntries    *prometheus.GaugeVec
-	clientConnects   *prometheus.GaugeVec
+	pollsTotal        prometheus.Counter
+	pollErrors        prometheus.Counter
+	pollDuration      prometheus.Gauge
+	lookupEntries     *prometheus.GaugeVec
+	clientConnects    *prometheus.GaugeVec
 	clientDisconnects *prometheus.GaugeVec
 	clientWriteErrors *prometheus.GaugeVec
 	clientReadErrors  *prometheus.GaugeVec
@@ -138,10 +138,10 @@ func NewPrometheusSink(port int, bindAddress string, maxTimeSeries int, filter *
 	buildInfo.WithLabelValues(version, runtime.Version()).Set(1)
 
 	sink := &PrometheusSink{
-		registry:      reg,
-		gauges:        gauges,
-		filter:        filter,
-		logger:        logger,
+		registry:          reg,
+		gauges:            gauges,
+		filter:            filter,
+		logger:            logger,
 		maxTimeSeries:     maxTimeSeries,
 		pollsTotal:        pollsTotal,
 		pollErrors:        pollErrors,

@@ -304,7 +304,7 @@ func (c *Collector) tryCollectOffsets(ctx context.Context, now int64) (*OffsetsS
 	}
 
 	return &OffsetsSnapshot{
-		Timestamp:      now,
+		Timestamp:       now,
 		GroupOffsets:    groupOffsets,
 		EarliestOffsets: earliestOffsets,
 		LatestOffsets:   latestOffsets,
