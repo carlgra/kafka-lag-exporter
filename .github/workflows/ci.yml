@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.9"
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.9"
 
       - name: Run tests
         run: go test -race -count=1 -coverprofile=coverage.out ./internal/...
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.9"
 
       - name: Build binary
         run: make build
@@ -88,34 +88,34 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.9"
 
       - name: Run integration tests
         run: make test-integration
 
   security:
+    # Scans Go dependencies for known CVEs using govulncheck (official Go team
+    # tool, pulls from the Go module proxy, call-graph aware so it only flags
+    # CVEs your code actually reaches).
+    #
+    # Previously used Trivy via `aquasec/trivy:latest`. Removed after the
+    # March 2026 Trivy supply chain compromise (CVE-2026-33634, CISA KEV):
+    # malicious releases exfiltrated CI secrets. Do not re-introduce without
+    # pinning to a known-good version/digest from a trusted registry.
     name: Security Scan
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trivy filesystem scan (Go deps + IaC)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src aquasec/trivy:latest fs \
-            --severity CRITICAL,HIGH --exit-code 1 .
-
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.9"
 
-      - name: Build Docker image
-        run: docker build -t kafka-lag-exporter:ci .
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
-      - name: Trivy image scan
-        run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
-            --severity CRITICAL,HIGH --exit-code 1 kafka-lag-exporter:ci
+      - name: Run govulncheck
+        run: govulncheck ./...
 
   helm-lint:
     name: Helm Lint
