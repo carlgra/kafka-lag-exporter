@@ -139,6 +139,20 @@ docker run -p 8000:8000 -v $(pwd)/config.yaml:/etc/kafka-lag-exporter/config.yam
 
 ### Install with Helm
 
+The chart is published as an OCI artifact to GHCR. No `helm repo add` is needed — Helm 3.8+ can install directly from the registry:
+
+```bash
+helm install kafka-lag-exporter \
+  oci://ghcr.io/carlgra/charts/kafka-lag-exporter \
+  --version 1.0.1 \
+  --namespace kafka-lag-exporter \
+  --create-namespace
+```
+
+Pin to a specific release with `--version`; omit it to install the latest. Browse all versions at [github.com/carlgra/kafka-lag-exporter/pkgs/container/charts%2Fkafka-lag-exporter](https://github.com/carlgra/kafka-lag-exporter/pkgs/container/charts%2Fkafka-lag-exporter).
+
+To install from a local checkout (e.g. while developing the chart):
+
 ```bash
 helm install kafka-lag-exporter ./charts/kafka-lag-exporter \
   --namespace kafka-lag-exporter \
