@@ -157,36 +157,13 @@ func extractClusterConfig(obj *unstructured.Unstructured) (config.ClusterConfig,
 	if found {
 		listeners, found, _ := unstructured.NestedSlice(status, "listeners")
 		if found {
-			for _, l := range listeners {
-				listener, ok := l.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				ltype, _ := listener["type"].(string)
-				if ltype == "plain" || ltype == "tls" {
-					if addrs, ok := listener["addresses"].([]interface{}); ok && len(addrs) > 0 {
-						addr, ok := addrs[0].(map[string]interface{})
-						if ok {
-							host, _ := addr["host"].(string)
-							port, _ := addr["port"].(float64)
-							if host != "" && port > 0 {
-								bootstrapServers = fmt.Sprintf("%s:%d", host, int(port))
-								break
-							}
-						}
-					}
-					if bs, ok := listener["bootstrapServers"].(string); ok && bs != "" {
-						bootstrapServers = bs
-						break
-					}
-				}
-			}
+			bootstrapServers = pickListenerBootstrap(listeners)
 		}
 	}
 
 	// Fall back to conventional service name.
 	if bootstrapServers == "" {
-		bootstrapServers = fmt.Sprintf("%s-kafka-bootstrap.%s.svc:9092", name, namespace)
+		bootstrapServers = fmt.Sprintf("%s-kafka-bootstrap.%s.svc.cluster.local:9092", name, namespace)
 	}
 
 	clusterName := name
@@ -201,4 +178,83 @@ func extractClusterConfig(obj *unstructured.Unstructured) (config.ClusterConfig,
 		Name:             clusterName,
 		BootstrapBrokers: bootstrapServers,
 	}, nil
+}
+
+// pickListenerBootstrap selects the best in-cluster listener from the Strimzi
+// status.listeners slice and returns its bootstrap address.
+//
+// In modern Strimzi v1beta2 the listener `name` field carries values like
+// "plain"/"tls" while `type` identifies the Kubernetes exposure mechanism
+// ("internal", "route", "loadbalancer", "nodeport", "ingress", "cluster-ip").
+// Older Strimzi versions used `type` for "plain"/"tls" directly. We prefer
+// matching by `name` and fall back to `type` for backward compatibility.
+//
+// Only listeners with an empty `type` (legacy) or `type == "internal"` are
+// considered, since the exporter runs in-cluster and should not attempt to
+// reach external listener addresses.
+//
+// Within the matched listener, `bootstrapServers` is preferred over
+// `addresses[0]`: the former is the authoritative Strimzi-advertised bootstrap
+// string, while the latter may contain a single address that is not suitable
+// for bootstrap connections.
+func pickListenerBootstrap(listeners []interface{}) string {
+	// Priority: name=="plain", name=="tls", type=="plain" (legacy), type=="tls" (legacy).
+	type candidate struct {
+		priority int
+		listener map[string]interface{}
+	}
+	best := candidate{priority: 0}
+
+	for _, l := range listeners {
+		listener, ok := l.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		lname, _ := listener["name"].(string)
+		ltype, _ := listener["type"].(string)
+
+		// Skip external exposure types — exporter runs in-cluster.
+		// Allowed types: empty (legacy), "internal" (modern v1beta2), or the
+		// legacy values "plain"/"tls" which some older Strimzi versions used
+		// in the type field.
+		if ltype != "" && ltype != "internal" && ltype != "plain" && ltype != "tls" {
+			continue
+		}
+
+		prio := 0
+		switch {
+		case lname == "plain":
+			prio = 4
+		case lname == "tls":
+			prio = 3
+		case lname == "" && ltype == "plain":
+			prio = 2
+		case lname == "" && ltype == "tls":
+			prio = 1
+		default:
+			continue
+		}
+
+		if prio > best.priority {
+			best = candidate{priority: prio, listener: listener}
+		}
+	}
+
+	if best.listener == nil {
+		return ""
+	}
+
+	if bs, ok := best.listener["bootstrapServers"].(string); ok && bs != "" {
+		return bs
+	}
+	if addrs, ok := best.listener["addresses"].([]interface{}); ok && len(addrs) > 0 {
+		if addr, ok := addrs[0].(map[string]interface{}); ok {
+			host, _ := addr["host"].(string)
+			port, _ := addr["port"].(float64)
+			if host != "" && port > 0 {
+				return fmt.Sprintf("%s:%d", host, int(port))
+			}
+		}
+	}
+	return ""
 }

@@ -85,7 +85,7 @@ func TestExtractClusterConfig_Fallback(t *testing.T) {
 	cluster, err := extractClusterConfig(obj)
 	require.NoError(t, err)
 	assert.Equal(t, "kafka-ns/my-kafka", cluster.Name)
-	assert.Equal(t, "my-kafka-kafka-bootstrap.kafka-ns.svc:9092", cluster.BootstrapBrokers)
+	assert.Equal(t, "my-kafka-kafka-bootstrap.kafka-ns.svc.cluster.local:9092", cluster.BootstrapBrokers)
 }
 
 func TestExtractClusterConfig_NoNamespace(t *testing.T) {
@@ -100,7 +100,7 @@ func TestExtractClusterConfig_NoNamespace(t *testing.T) {
 	cluster, err := extractClusterConfig(obj)
 	require.NoError(t, err)
 	assert.Equal(t, "my-kafka", cluster.Name) // No namespace prefix.
-	assert.Equal(t, "my-kafka-kafka-bootstrap..svc:9092", cluster.BootstrapBrokers)
+	assert.Equal(t, "my-kafka-kafka-bootstrap..svc.cluster.local:9092", cluster.BootstrapBrokers)
 }
 
 func TestExtractClusterConfig_TLSListener(t *testing.T) {
@@ -192,10 +192,10 @@ func TestExtractClusterConfig_EmptyListeners(t *testing.T) {
 	cluster, err := extractClusterConfig(obj)
 	require.NoError(t, err)
 	// Falls back to service name.
-	assert.Equal(t, "kafka-kafka-bootstrap.ns.svc:9092", cluster.BootstrapBrokers)
+	assert.Equal(t, "kafka-kafka-bootstrap.ns.svc.cluster.local:9092", cluster.BootstrapBrokers)
 }
 
-func TestExtractClusterConfig_AddressesPrioritizedOverBootstrapServers(t *testing.T) {
+func TestExtractClusterConfig_BootstrapServersPrioritizedOverAddresses(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"metadata": map[string]interface{}{
@@ -221,8 +221,124 @@ func TestExtractClusterConfig_AddressesPrioritizedOverBootstrapServers(t *testin
 
 	cluster, err := extractClusterConfig(obj)
 	require.NoError(t, err)
-	// addresses are checked first.
-	assert.Equal(t, "addr-host:9092", cluster.BootstrapBrokers)
+	// bootstrapServers is authoritative and wins over addresses[0].
+	assert.Equal(t, "bs-host:9092", cluster.BootstrapBrokers)
+}
+
+// --- modern Strimzi v1beta2 schema tests -----------------------------------
+
+func TestExtractClusterConfig_ModernSchema_InternalPlain(t *testing.T) {
+	// Modern Strimzi: `name` carries "plain"/"tls", `type` carries the
+	// exposure mechanism ("internal", "route", etc).
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "my-cluster",
+				"namespace": "kafka",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "plain",
+						"type":             "internal",
+						"bootstrapServers": "my-cluster-kafka-bootstrap:9092",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "kafka/my-cluster", cluster.Name)
+	assert.Equal(t, "my-cluster-kafka-bootstrap:9092", cluster.BootstrapBrokers)
+}
+
+func TestExtractClusterConfig_ModernSchema_InternalTLSOnly(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "my-cluster",
+				"namespace": "kafka",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "tls",
+						"type":             "internal",
+						"bootstrapServers": "my-cluster-kafka-bootstrap:9093",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "my-cluster-kafka-bootstrap:9093", cluster.BootstrapBrokers)
+}
+
+func TestExtractClusterConfig_ModernSchema_MixedInternalAndExternal(t *testing.T) {
+	// A cluster with both an internal plain listener and an external
+	// load-balancer listener must pick the internal one — the exporter
+	// runs in-cluster and the LB address is unreachable or undesirable.
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "my-cluster",
+				"namespace": "kafka",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name": "external",
+						"type": "loadbalancer",
+						"addresses": []interface{}{
+							map[string]interface{}{
+								"host": "203.0.113.10",
+								"port": float64(9094),
+							},
+						},
+						"bootstrapServers": "203.0.113.10:9094",
+					},
+					map[string]interface{}{
+						"name":             "plain",
+						"type":             "internal",
+						"bootstrapServers": "my-cluster-kafka-bootstrap:9092",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "my-cluster-kafka-bootstrap:9092", cluster.BootstrapBrokers)
+}
+
+func TestExtractClusterConfig_LegacySchema_TypeOnly(t *testing.T) {
+	// Older Strimzi versions exposed listeners with `type` holding "plain"/"tls"
+	// and no `name` field. Ensure backward compatibility.
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "legacy-kafka",
+				"namespace": "ns",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"type":             "plain",
+						"bootstrapServers": "legacy-broker:9092",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "legacy-broker:9092", cluster.BootstrapBrokers)
 }
 
 // --- handleEvent tests using fake k8s watcher ------------------------------
