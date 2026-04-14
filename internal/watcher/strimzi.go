@@ -25,15 +25,21 @@ var kafkaGVR = schema.GroupVersionResource{
 
 // StrimziWatcher watches Strimzi Kafka CRDs and emits ClusterEvents.
 type StrimziWatcher struct {
-	client dynamic.Interface
-	events chan ClusterEvent
-	cancel context.CancelFunc
-	logger *slog.Logger
+	client    dynamic.Interface
+	namespace string
+	events    chan ClusterEvent
+	cancel    context.CancelFunc
+	logger    *slog.Logger
 }
 
 // NewStrimziWatcher creates a new Strimzi CRD watcher.
 // It requires in-cluster Kubernetes configuration.
-func NewStrimziWatcher(logger *slog.Logger) (*StrimziWatcher, error) {
+//
+// If namespace is empty, the watch is cluster-scoped and the ServiceAccount
+// must have a ClusterRole granting watch on kafkas.kafka.strimzi.io. If
+// namespace is non-empty, the watch is restricted to that namespace and a
+// namespace-scoped Role/RoleBinding is sufficient.
+func NewStrimziWatcher(namespace string, logger *slog.Logger) (*StrimziWatcher, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("getting in-cluster config: %w", err)
@@ -46,10 +52,11 @@ func NewStrimziWatcher(logger *slog.Logger) (*StrimziWatcher, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &StrimziWatcher{
-		client: client,
-		events: make(chan ClusterEvent, 16),
-		cancel: cancel,
-		logger: logger,
+		client:    client,
+		namespace: namespace,
+		events:    make(chan ClusterEvent, 16),
+		cancel:    cancel,
+		logger:    logger,
 	}
 
 	go w.run(ctx)
@@ -57,13 +64,14 @@ func NewStrimziWatcher(logger *slog.Logger) (*StrimziWatcher, error) {
 }
 
 // NewStrimziWatcherFromClient creates a watcher with a provided dynamic client (for testing).
-func NewStrimziWatcherFromClient(client dynamic.Interface, logger *slog.Logger) *StrimziWatcher {
+func NewStrimziWatcherFromClient(client dynamic.Interface, namespace string, logger *slog.Logger) *StrimziWatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &StrimziWatcher{
-		client: client,
-		events: make(chan ClusterEvent, 16),
-		cancel: cancel,
-		logger: logger,
+		client:    client,
+		namespace: namespace,
+		events:    make(chan ClusterEvent, 16),
+		cancel:    cancel,
+		logger:    logger,
 	}
 	go w.run(ctx)
 	return w
@@ -96,7 +104,16 @@ func (w *StrimziWatcher) run(ctx context.Context) {
 }
 
 func (w *StrimziWatcher) watch(ctx context.Context) error {
-	watcher, err := w.client.Resource(kafkaGVR).Namespace("").Watch(ctx, metav1.ListOptions{})
+	// Empty namespace = cluster-scoped watch (requires ClusterRole).
+	// Non-empty = namespace-scoped watch (Role in that namespace suffices).
+	resource := w.client.Resource(kafkaGVR)
+	var watcher watch.Interface
+	var err error
+	if w.namespace == "" {
+		watcher, err = resource.Watch(ctx, metav1.ListOptions{})
+	} else {
+		watcher, err = resource.Namespace(w.namespace).Watch(ctx, metav1.ListOptions{})
+	}
 	if err != nil {
 		return fmt.Errorf("starting watch: %w", err)
 	}
