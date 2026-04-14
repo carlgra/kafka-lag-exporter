@@ -57,6 +57,11 @@ type ClusterConfig struct {
 // WatcherConfig configures cluster watchers.
 type WatcherConfig struct {
 	Strimzi bool `mapstructure:"strimzi"`
+	// StrimziWatchNamespace, when set, restricts the Strimzi watcher to a
+	// single namespace. Empty string means watch cluster-wide (requires
+	// ClusterRole). Must match the namespace of the Role/RoleBinding created
+	// by the Helm chart when running namespace-scoped.
+	StrimziWatchNamespace string `mapstructure:"strimziWatchNamespace"`
 }
 
 // LookupConfig configures the offset lookup table.

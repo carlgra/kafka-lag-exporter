@@ -49,7 +49,7 @@ func New(cfg *config.Config, sinks []sink.Sink, lookupFactory func() lookup.Look
 		sinks:          sinks,
 		lookupFactory:  lookupFactory,
 		clientFactory:  defaultClientFactory,
-		watcherFactory: defaultWatcherFactory,
+		watcherFactory: defaultWatcherFactoryFor(cfg),
 		collectors:     make(map[string]collectorEntry),
 		logger:         logger,
 	}
@@ -80,8 +80,14 @@ func defaultClientFactory(clusterCfg config.ClusterConfig, globalCfg *config.Con
 	return kafka.NewFranzClient(clusterCfg, globalCfg, logger)
 }
 
-func defaultWatcherFactory(logger *slog.Logger) (watcher.Watcher, error) {
-	return watcher.NewStrimziWatcher(logger)
+// defaultWatcherFactoryFor returns a WatcherFactory that creates a
+// StrimziWatcher pinned to the namespace configured in cfg. The closure keeps
+// the WatcherFactory signature (logger-only) stable so tests overriding it via
+// WithWatcherFactory don't need to thread config through.
+func defaultWatcherFactoryFor(cfg *config.Config) WatcherFactory {
+	return func(logger *slog.Logger) (watcher.Watcher, error) {
+		return watcher.NewStrimziWatcher(cfg.Watchers.StrimziWatchNamespace, logger)
+	}
 }
 
 // Start launches collectors for all configured clusters and starts watchers.
