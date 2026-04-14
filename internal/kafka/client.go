@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -47,11 +46,14 @@ func NewFranzClient(clusterCfg config.ClusterConfig, globalCfg *config.Config, l
 	brokers := strings.Split(clusterCfg.BootstrapBrokers, ",")
 	timeout := globalCfg.KafkaClientTimeout()
 
+	// Use kgo.DialTimeout rather than kgo.Dialer so it composes with
+	// kgo.DialTLSConfig below — franz-go rejects setting both Dialer and
+	// DialTLSConfig simultaneously.
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.ConnIdleTimeout(timeout),
 		kgo.RequestTimeoutOverhead(timeout),
-		kgo.Dialer((&net.Dialer{Timeout: timeout}).DialContext),
+		kgo.DialTimeout(timeout),
 	}
 
 	// Merge consumer and admin client properties (they share the same connection in franz-go).
@@ -131,9 +133,36 @@ func buildTLSConfig(props map[string]string, logger *slog.Logger) (*tls.Config, 
 		logger.Debug("loaded CA certificate", "file", caFile)
 	}
 
-	// Load client certificate and key if provided.
-	certFile := props["ssl.keystore.location"]
-	keyFile := props["ssl.key.location"]
+	// Load client certificate and key if provided. Two sets of property names
+	// are accepted:
+	//   - PEM-style (matches Kafka's ssl.keystore.type=PEM and the original
+	//     Scala kafka-lag-exporter): ssl.keystore.certificate.chain +
+	//     ssl.keystore.key.
+	//   - Legacy convenience keys used by this exporter: ssl.keystore.location
+	//     (PEM cert chain) + ssl.key.location (PEM private key).
+	// If both are set, the PEM-style keys win and a warning is logged.
+	pemCertFile := props["ssl.keystore.certificate.chain"]
+	pemKeyFile := props["ssl.keystore.key"]
+	legacyCertFile := props["ssl.keystore.location"]
+	legacyKeyFile := props["ssl.key.location"]
+
+	var certFile, keyFile string
+	switch {
+	case pemCertFile != "" && pemKeyFile != "":
+		certFile, keyFile = pemCertFile, pemKeyFile
+		if legacyCertFile != "" || legacyKeyFile != "" {
+			logger.Warn(
+				"both PEM (ssl.keystore.certificate.chain/ssl.keystore.key) "+
+					"and legacy (ssl.keystore.location/ssl.key.location) client "+
+					"cert properties are set; using the PEM-style properties",
+				"pem_cert", pemCertFile,
+				"pem_key", pemKeyFile,
+			)
+		}
+	case legacyCertFile != "" && legacyKeyFile != "":
+		certFile, keyFile = legacyCertFile, legacyKeyFile
+	}
+
 	if certFile != "" && keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
@@ -142,6 +171,13 @@ func buildTLSConfig(props map[string]string, logger *slog.Logger) (*tls.Config, 
 		tlsCfg.Certificates = []tls.Certificate{cert}
 		logger.Debug("loaded client certificate", "cert", certFile, "key", keyFile)
 	}
+
+	// ssl.keystore.type / ssl.truststore.type of PEM are accepted silently —
+	// this exporter only supports PEM-format files regardless, so the value is
+	// informational. Unknown values are ignored for forward compatibility with
+	// Kafka's property namespace.
+	_ = props["ssl.keystore.type"]
+	_ = props["ssl.truststore.type"]
 
 	return tlsCfg, nil
 }

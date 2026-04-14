@@ -21,10 +21,17 @@ clusters: {}
 #    # topicBlacklist: []
 #    # groupWhitelist: []
 #    # groupBlacklist: []
+#    # consumerProperties and adminClientProperties are merged before being
+#    # passed to the Kafka client, so identical TLS/SASL config only needs to
+#    # be declared once (either block is fine). See README.md for the full
+#    # list of supported ssl.* property names.
 #    consumerProperties:
 #      security.protocol: SSL
-#    adminClientProperties:
-#      security.protocol: SSL
+#      ssl.truststore.location: /etc/kafka-certs/ca.pem
+#      # PEM-style client cert (matches Kafka's ssl.keystore.type: PEM):
+#      ssl.keystore.certificate.chain: /etc/kafka-certs/client.pem
+#      ssl.keystore.key: /etc/kafka-certs/client.key
+#    adminClientProperties: {}
 #    labels:
 #      location: ny
 #      zone: "us-east"
