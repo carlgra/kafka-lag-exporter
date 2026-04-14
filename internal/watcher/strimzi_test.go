@@ -229,6 +229,11 @@ func TestExtractClusterConfig_AddressesPrioritizedOverBootstrapServers(t *testin
 
 func newFakeWatcher(t *testing.T) (*StrimziWatcher, *watch.FakeWatcher) {
 	t.Helper()
+	return newFakeWatcherWithNamespace(t, "")
+}
+
+func newFakeWatcherWithNamespace(t *testing.T, namespace string) (*StrimziWatcher, *watch.FakeWatcher) {
+	t.Helper()
 
 	scheme := runtime.NewScheme()
 	fakeClient := fakedynamic.NewSimpleDynamicClient(scheme)
@@ -236,7 +241,7 @@ func newFakeWatcher(t *testing.T) (*StrimziWatcher, *watch.FakeWatcher) {
 	fw := watch.NewFake()
 	fakeClient.PrependWatchReactor("kafkas", k8stesting.DefaultWatchReactor(fw, nil))
 
-	w := NewStrimziWatcherFromClient(fakeClient, slog.Default())
+	w := NewStrimziWatcherFromClient(fakeClient, namespace, slog.Default())
 	return w, fw
 }
 
@@ -349,6 +354,78 @@ func TestStrimziWatcher_HandleEvent_InvalidObject(t *testing.T) {
 		t.Fatalf("should not have received event, got: %+v", event)
 	default:
 	}
+}
+
+// --- Namespace scope tests --------------------------------------------------
+
+// recordingClient wraps a fake dynamic client to capture the namespace passed
+// to the Resource().Namespace().Watch() call. We record by spying on the
+// reactor invocation, since fakedynamic doesn't expose the namespace cleanly
+// through its action recorder for the cluster-scope vs namespace-scope
+// distinction.
+func newRecordingFakeWatcher(t *testing.T, namespace string) (*StrimziWatcher, *watch.FakeWatcher, func() string) {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	fakeClient := fakedynamic.NewSimpleDynamicClient(scheme)
+
+	fw := watch.NewFake()
+	var observedNS string
+	fakeClient.PrependWatchReactor("kafkas", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		observedNS = action.GetNamespace()
+		return true, fw, nil
+	})
+
+	w := NewStrimziWatcherFromClient(fakeClient, namespace, slog.Default())
+	return w, fw, func() string { return observedNS }
+}
+
+func TestStrimziWatcher_Watch_ClusterScope(t *testing.T) {
+	w, fw, observed := newRecordingFakeWatcher(t, "")
+	defer w.Stop()
+
+	// Trigger an event so we know the watch has been started.
+	kafkaObj := &unstructured.Unstructured{}
+	kafkaObj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "kafka.strimzi.io",
+		Version: "v1beta2",
+		Kind:    "Kafka",
+	})
+	kafkaObj.SetName("k")
+	kafkaObj.SetNamespace("any-ns")
+	fw.Add(kafkaObj)
+
+	select {
+	case <-w.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+
+	assert.Equal(t, "", observed(), "cluster-scope watch should pass empty namespace")
+}
+
+func TestStrimziWatcher_Watch_NamespaceScope(t *testing.T) {
+	const ns = "nightly-backend-kafka"
+	w, fw, observed := newRecordingFakeWatcher(t, ns)
+	defer w.Stop()
+
+	kafkaObj := &unstructured.Unstructured{}
+	kafkaObj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "kafka.strimzi.io",
+		Version: "v1beta2",
+		Kind:    "Kafka",
+	})
+	kafkaObj.SetName("k")
+	kafkaObj.SetNamespace(ns)
+	fw.Add(kafkaObj)
+
+	select {
+	case <-w.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+
+	assert.Equal(t, ns, observed(), "namespace-scope watch should pass configured namespace")
 }
 
 func TestStrimziWatcher_Stop(t *testing.T) {

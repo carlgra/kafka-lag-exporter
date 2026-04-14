@@ -134,3 +134,6 @@ data:
         {{- end }}
     watchers:
       strimzi: {{ .Values.watchers.strimzi }}
+      {{- if .Values.watchers.strimziWatchNamespace }}
+      strimziWatchNamespace: {{ .Values.watchers.strimziWatchNamespace | quote }}
+      {{- end }}
