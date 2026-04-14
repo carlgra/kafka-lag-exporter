@@ -266,10 +266,27 @@ Defined under `clusters[]` in the config file.
 | `topicAllowlist` | `[]` | No | Regex patterns for topics to monitor |
 | `topicDenylist` | `[]` | No | Regex patterns for topics to exclude |
 | `labels` | `{}` | No | Custom labels added to all metrics for this cluster |
-| `consumerProperties` | `{}` | No | Additional Kafka consumer properties (e.g., `security.protocol: SSL`) |
-| `adminClientProperties` | `{}` | No | Additional Kafka admin client properties |
+| `consumerProperties` | `{}` | No | Additional Kafka consumer properties (e.g., `security.protocol: SSL`). See [TLS / mTLS properties](#tls--mtls-properties). |
+| `adminClientProperties` | `{}` | No | Additional Kafka admin client properties. Merged with `consumerProperties`, so identical TLS/SASL config only needs to be declared once. |
 
 > **Backward Compatibility**: The deprecated field names `groupWhitelist`, `groupBlacklist`, `topicWhitelist`, `topicBlacklist`, and `metricWhitelist` are still supported. The new names take precedence if both are set.
+
+#### TLS / mTLS properties
+
+Set any of the following under `consumerProperties` (they are also merged into the admin client, so you do not need to repeat them under `adminClientProperties`):
+
+| Property | Description |
+|---|---|
+| `security.protocol` | `SSL` or `SASL_SSL` to enable TLS. Any value containing `SSL` triggers TLS. |
+| `ssl.truststore.location` | Path to a PEM-encoded CA bundle used to verify the broker. |
+| `ssl.truststore.type` | Accepted but informational — only `PEM` files are supported. |
+| `ssl.keystore.certificate.chain` | Path to the client certificate chain (PEM). Matches Kafka's property name when `ssl.keystore.type: PEM`. |
+| `ssl.keystore.key` | Path to the client private key (PEM). Pairs with `ssl.keystore.certificate.chain`. |
+| `ssl.keystore.location` | Legacy alias for the client certificate chain (PEM). |
+| `ssl.key.location` | Legacy alias for the client private key (PEM). |
+| `ssl.keystore.type` | Accepted but informational — only `PEM` files are supported. |
+
+If both the PEM-style (`ssl.keystore.certificate.chain` + `ssl.keystore.key`) and legacy (`ssl.keystore.location` + `ssl.key.location`) client-certificate properties are set, the PEM-style properties win and a warning is logged. JKS/PKCS#12 keystores are not supported — convert them to PEM first.
 
 ### Redis Configuration
 

@@ -1,12 +1,21 @@
 package kafka
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
 	"log/slog"
+	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/seglo/kafka-lag-exporter/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -194,6 +203,171 @@ func TestClientMetrics_OnBrokerRead_Error(t *testing.T) {
 	m := &ClientMetrics{}
 	m.OnBrokerRead(kgo.BrokerMetadata{}, 0, 0, 0, 0, assert.AnError)
 	assert.Equal(t, int64(1), m.ReadErrors())
+}
+
+// --- TLS constructor tests --------------------------------------------------
+//
+// These are regression tests for a bug where NewFranzClient always appended
+// kgo.Dialer(...) to the options slice and additionally appended
+// kgo.DialTLSConfig(...) when security.protocol was SSL. franz-go rejects that
+// combination at NewClient time with "cannot set both Dialer and
+// DialTLSConfig", so any SSL-enabled cluster failed at startup.
+//
+// We cover three flavours of SSL config so the table of property-name variants
+// is exercised:
+//   - CA trust only (no client cert)
+//   - CA trust + PEM-style keystore (ssl.keystore.certificate.chain / ssl.keystore.key)
+//   - CA trust + legacy keystore (ssl.keystore.location / ssl.key.location)
+//
+// NewFranzClient does not open a network connection — kgo.NewClient is lazy —
+// so the constructor returning nil error is sufficient to prove the option set
+// validates.
+
+// tlsFixture writes a self-signed CA-ish cert + key to a t.TempDir() and
+// returns (caFile, certFile, keyFile). The same cert is used as both the CA
+// and the leaf, which is fine since we never actually establish a TLS
+// connection in these tests — we only care that the files parse.
+func tlsFixture(t *testing.T) (caFile, certFile, keyFile string) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "kafka-lag-exporter-test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	caFile = filepath.Join(dir, "ca.pem")
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	require.NoError(t, os.WriteFile(caFile, certPEM, 0600))
+	require.NoError(t, os.WriteFile(certFile, certPEM, 0600))
+
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	require.NoError(t, os.WriteFile(keyFile, keyPEM, 0600))
+
+	return caFile, certFile, keyFile
+}
+
+func newFranzClientForTest(t *testing.T, props map[string]string) (*FranzClient, error) {
+	t.Helper()
+	clusterCfg := config.ClusterConfig{
+		Name:               "test",
+		BootstrapBrokers:   "127.0.0.1:9092",
+		ConsumerProperties: props,
+	}
+	globalCfg := &config.Config{KafkaClientTimeoutSeconds: 10}
+	return NewFranzClient(clusterCfg, globalCfg, noopLogger())
+}
+
+func TestNewFranzClient_SSL_TruststoreOnly(t *testing.T) {
+	caFile, _, _ := tlsFixture(t)
+	c, err := newFranzClientForTest(t, map[string]string{
+		"security.protocol":       "SSL",
+		"ssl.truststore.location": caFile,
+	})
+	require.NoError(t, err, "SSL-only config must not collide Dialer + DialTLSConfig")
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestNewFranzClient_SSL_PEMKeystore(t *testing.T) {
+	caFile, certFile, keyFile := tlsFixture(t)
+	c, err := newFranzClientForTest(t, map[string]string{
+		"security.protocol":              "SSL",
+		"ssl.truststore.location":        caFile,
+		"ssl.truststore.type":            "PEM",
+		"ssl.keystore.type":              "PEM",
+		"ssl.keystore.certificate.chain": certFile,
+		"ssl.keystore.key":               keyFile,
+	})
+	require.NoError(t, err, "PEM-style keystore properties must be honored")
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestNewFranzClient_SSL_LegacyKeystore(t *testing.T) {
+	caFile, certFile, keyFile := tlsFixture(t)
+	c, err := newFranzClientForTest(t, map[string]string{
+		"security.protocol":       "SSL",
+		"ssl.truststore.location": caFile,
+		"ssl.keystore.location":   certFile,
+		"ssl.key.location":        keyFile,
+	})
+	require.NoError(t, err, "legacy keystore properties must still work")
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestNewFranzClient_SASL_SSL_Combined(t *testing.T) {
+	// SASL_SSL is a common production setup; make sure it also validates.
+	caFile, _, _ := tlsFixture(t)
+	c, err := newFranzClientForTest(t, map[string]string{
+		"security.protocol":       "SASL_SSL",
+		"ssl.truststore.location": caFile,
+		"sasl.mechanism":          "PLAIN",
+		"sasl.username":           "user",
+		"sasl.password":           "pass",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestBuildTLSConfig_PEMKeystore(t *testing.T) {
+	caFile, certFile, keyFile := tlsFixture(t)
+	cfg, err := buildTLSConfig(map[string]string{
+		"ssl.truststore.location":        caFile,
+		"ssl.keystore.certificate.chain": certFile,
+		"ssl.keystore.key":               keyFile,
+	}, noopLogger())
+	require.NoError(t, err)
+	require.Len(t, cfg.Certificates, 1, "PEM keystore properties must load a client cert")
+	require.NotNil(t, cfg.RootCAs)
+}
+
+func TestBuildTLSConfig_PEMKeystore_PreferredOverLegacy(t *testing.T) {
+	// When both sets of keys are set, the PEM-style keys win. We detect that
+	// indirectly: point the legacy keys at a bogus path and the PEM keys at
+	// real files. A clean load proves the legacy path was not consulted.
+	_, certFile, keyFile := tlsFixture(t)
+	cfg, err := buildTLSConfig(map[string]string{
+		"ssl.keystore.certificate.chain": certFile,
+		"ssl.keystore.key":               keyFile,
+		"ssl.keystore.location":          "/nonexistent/bogus.pem",
+		"ssl.key.location":               "/nonexistent/bogus.key",
+	}, noopLogger())
+	require.NoError(t, err)
+	require.Len(t, cfg.Certificates, 1)
+}
+
+func TestBuildTLSConfig_AcceptsKeystoreTypePEM(t *testing.T) {
+	// ssl.keystore.type / ssl.truststore.type of "PEM" must be accepted
+	// without error (the exporter only supports PEM, so the value is
+	// informational).
+	cfg, err := buildTLSConfig(map[string]string{
+		"ssl.keystore.type":   "PEM",
+		"ssl.truststore.type": "PEM",
+	}, noopLogger())
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 }
 
 func TestClientMetrics_AllCounters(t *testing.T) {
