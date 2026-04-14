@@ -104,3 +104,46 @@ jobs:
           helm push \
             "kafka-lag-exporter-${{ steps.version.outputs.version }}.tgz" \
             "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+  release:
+    name: Create GitHub Release
+    needs: helm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cat > release-notes.md <<NOTES
+          ## Install
+
+          **Docker image**
+
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${VERSION}
+          \`\`\`
+
+          **Helm chart (OCI)**
+
+          \`\`\`bash
+          helm install kafka-lag-exporter \\
+            oci://ghcr.io/${{ github.repository_owner }}/charts/kafka-lag-exporter \\
+            --version ${VERSION} \\
+            --namespace kafka-lag-exporter \\
+            --create-namespace
+          \`\`\`
+
+          ---
+          NOTES
+
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --generate-notes
