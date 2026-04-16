@@ -52,6 +52,9 @@ type ClusterConfig struct {
 	Labels                map[string]string `mapstructure:"labels"`
 	ConsumerProperties    map[string]string `mapstructure:"consumerProperties"`
 	AdminClientProperties map[string]string `mapstructure:"adminClientProperties"`
+	// TLSCACert holds a PEM-encoded CA certificate for TLS connections.
+	// Set automatically by Strimzi autodiscovery from status.listeners[].certificates.
+	TLSCACert string `mapstructure:"tlsCACert"`
 }
 
 // WatcherConfig configures cluster watchers.

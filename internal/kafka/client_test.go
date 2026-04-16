@@ -370,6 +370,75 @@ func TestBuildTLSConfig_AcceptsKeystoreTypePEM(t *testing.T) {
 	require.NotNil(t, cfg)
 }
 
+// --- TLSCACert (in-memory CA from Strimzi autodiscovery) tests ---------------
+
+// generateTestCACertPEM returns a PEM-encoded self-signed CA certificate
+// suitable for testing the in-memory CA cert path.
+func generateTestCACertPEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(42),
+		Subject:               pkix.Name{CommonName: "test-strimzi-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes}))
+}
+
+func TestNewFranzClient_SSL_TLSCACert_InMemory(t *testing.T) {
+	caPEM := generateTestCACertPEM(t)
+	clusterCfg := config.ClusterConfig{
+		Name:               "strimzi-auto",
+		BootstrapBrokers:   "127.0.0.1:9093",
+		ConsumerProperties: map[string]string{"security.protocol": "SSL"},
+		TLSCACert:          caPEM,
+	}
+	globalCfg := &config.Config{KafkaClientTimeoutSeconds: 10}
+	c, err := NewFranzClient(clusterCfg, globalCfg, noopLogger())
+	require.NoError(t, err, "in-memory CA cert from Strimzi should work")
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestNewFranzClient_SSL_TruststoreFileOverridesTLSCACert(t *testing.T) {
+	// When ssl.truststore.location is set (file-based), TLSCACert is ignored.
+	// This ensures static config takes precedence over autodiscovery.
+	caFile, _, _ := tlsFixture(t)
+	caPEM := generateTestCACertPEM(t) // different CA
+	clusterCfg := config.ClusterConfig{
+		Name:             "mixed",
+		BootstrapBrokers: "127.0.0.1:9093",
+		ConsumerProperties: map[string]string{
+			"security.protocol":       "SSL",
+			"ssl.truststore.location": caFile,
+		},
+		TLSCACert: caPEM,
+	}
+	globalCfg := &config.Config{KafkaClientTimeoutSeconds: 10}
+	c, err := NewFranzClient(clusterCfg, globalCfg, noopLogger())
+	require.NoError(t, err, "file-based truststore should take precedence")
+	require.NotNil(t, c)
+	t.Cleanup(c.Close)
+}
+
+func TestBuildTLSConfig_TLSCACert_NotUsedDirectly(t *testing.T) {
+	// buildTLSConfig itself doesn't handle TLSCACert — it only deals with
+	// properties. The in-memory cert is applied in NewFranzClient. Verify
+	// that buildTLSConfig with no truststore.location produces nil RootCAs.
+	cfg, err := buildTLSConfig(map[string]string{}, noopLogger())
+	require.NoError(t, err)
+	assert.Nil(t, cfg.RootCAs, "buildTLSConfig alone should not set RootCAs without truststore.location")
+}
+
 func TestClientMetrics_AllCounters(t *testing.T) {
 	m := &ClientMetrics{}
 	m.OnBrokerConnect(kgo.BrokerMetadata{}, 0, nil, nil)

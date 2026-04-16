@@ -149,6 +149,9 @@ func (w *StrimziWatcher) handleEvent(ctx context.Context, event watch.Event) {
 	switch event.Type {
 	case watch.Added, watch.Modified:
 		w.logger.Info("cluster added/modified", "cluster", cluster.Name)
+		if cluster.TLSCACert != "" {
+			w.logger.Info("auto-TLS configured from Strimzi CR certificates", "cluster", cluster.Name)
+		}
 		ce = ClusterEvent{Type: ClusterAdded, Cluster: cluster}
 	case watch.Deleted:
 		w.logger.Info("cluster removed", "cluster", cluster.Name)
@@ -170,11 +173,12 @@ func extractClusterConfig(obj *unstructured.Unstructured) (config.ClusterConfig,
 
 	// Extract bootstrap server from status.
 	bootstrapServers := ""
+	var winningListener map[string]interface{}
 	status, found, _ := unstructured.NestedMap(obj.Object, "status")
 	if found {
 		listeners, found, _ := unstructured.NestedSlice(status, "listeners")
 		if found {
-			bootstrapServers = pickListenerBootstrap(listeners)
+			bootstrapServers, winningListener = pickListenerBootstrapAndMeta(listeners)
 		}
 	}
 
@@ -191,14 +195,42 @@ func extractClusterConfig(obj *unstructured.Unstructured) (config.ClusterConfig,
 	// Remove trailing comma if present.
 	bootstrapServers = strings.TrimRight(bootstrapServers, ",")
 
-	return config.ClusterConfig{
+	cluster := config.ClusterConfig{
 		Name:             clusterName,
 		BootstrapBrokers: bootstrapServers,
-	}, nil
+	}
+
+	// Auto-configure TLS from the winning listener's certificates or name.
+	if winningListener != nil {
+		caCert := extractListenerCACert(winningListener)
+		lname, _ := winningListener["name"].(string)
+		if caCert != "" || lname == "tls" {
+			cluster.TLSCACert = caCert
+			cluster.ConsumerProperties = map[string]string{"security.protocol": "SSL"}
+			cluster.AdminClientProperties = map[string]string{"security.protocol": "SSL"}
+		}
+	}
+
+	return cluster, nil
 }
 
-// pickListenerBootstrap selects the best in-cluster listener from the Strimzi
-// status.listeners slice and returns its bootstrap address.
+// extractListenerCACert extracts the first PEM certificate from a listener's
+// certificates field, if present.
+func extractListenerCACert(listener map[string]interface{}) string {
+	certs, ok := listener["certificates"].([]interface{})
+	if !ok || len(certs) == 0 {
+		return ""
+	}
+	cert, ok := certs[0].(string)
+	if !ok {
+		return ""
+	}
+	return cert
+}
+
+// pickListenerBootstrapAndMeta selects the best in-cluster listener from the
+// Strimzi status.listeners slice and returns its bootstrap address along with
+// the raw listener map for further inspection (e.g. certificates).
 //
 // In modern Strimzi v1beta2 the listener `name` field carries values like
 // "plain"/"tls" while `type` identifies the Kubernetes exposure mechanism
@@ -214,7 +246,7 @@ func extractClusterConfig(obj *unstructured.Unstructured) (config.ClusterConfig,
 // `addresses[0]`: the former is the authoritative Strimzi-advertised bootstrap
 // string, while the latter may contain a single address that is not suitable
 // for bootstrap connections.
-func pickListenerBootstrap(listeners []interface{}) string {
+func pickListenerBootstrapAndMeta(listeners []interface{}) (string, map[string]interface{}) {
 	// Priority: name=="plain", name=="tls", type=="plain" (legacy), type=="tls" (legacy).
 	type candidate struct {
 		priority int
@@ -258,20 +290,20 @@ func pickListenerBootstrap(listeners []interface{}) string {
 	}
 
 	if best.listener == nil {
-		return ""
+		return "", nil
 	}
 
 	if bs, ok := best.listener["bootstrapServers"].(string); ok && bs != "" {
-		return bs
+		return bs, best.listener
 	}
 	if addrs, ok := best.listener["addresses"].([]interface{}); ok && len(addrs) > 0 {
 		if addr, ok := addrs[0].(map[string]interface{}); ok {
 			host, _ := addr["host"].(string)
 			port, _ := addr["port"].(float64)
 			if host != "" && port > 0 {
-				return fmt.Sprintf("%s:%d", host, int(port))
+				return fmt.Sprintf("%s:%d", host, int(port)), best.listener
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
