@@ -67,6 +67,16 @@ func NewFranzClient(clusterCfg config.ClusterConfig, globalCfg *config.Config, l
 			if err != nil {
 				return nil, fmt.Errorf("building TLS config for cluster %s: %w", clusterCfg.Name, err)
 			}
+			// If no file-based CA was loaded but the cluster has an in-memory
+			// CA cert from Strimzi autodiscovery, use it as the trust anchor.
+			if tlsCfg.RootCAs == nil && clusterCfg.TLSCACert != "" {
+				pool := x509.NewCertPool()
+				if !pool.AppendCertsFromPEM([]byte(clusterCfg.TLSCACert)) {
+					return nil, fmt.Errorf("parsing in-memory CA certificate for cluster %s", clusterCfg.Name)
+				}
+				tlsCfg.RootCAs = pool
+				logger.Info("auto-TLS configured from Strimzi CR certificates", "cluster", clusterCfg.Name)
+			}
 			opts = append(opts, kgo.DialTLSConfig(tlsCfg))
 			logger.Info("TLS configured", "cluster", clusterCfg.Name)
 		}

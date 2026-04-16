@@ -544,6 +544,128 @@ func TestStrimziWatcher_Watch_NamespaceScope(t *testing.T) {
 	assert.Equal(t, ns, observed(), "namespace-scope watch should pass configured namespace")
 }
 
+// --- auto-TLS from Strimzi CR certificates tests ----------------------------
+
+func TestExtractClusterConfig_TLSListenerWithCertificates(t *testing.T) {
+	certPEM := "-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIUFakeTestCert=\n-----END CERTIFICATE-----\n"
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "secure-kafka",
+				"namespace": "backend",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "tls",
+						"type":             "internal",
+						"bootstrapServers": "secure-kafka-bootstrap.backend.svc:9093",
+						"certificates": []interface{}{
+							certPEM,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "backend/secure-kafka", cluster.Name)
+	assert.Equal(t, "secure-kafka-bootstrap.backend.svc:9093", cluster.BootstrapBrokers)
+	assert.Equal(t, certPEM, cluster.TLSCACert, "TLSCACert should be populated from listener certificates")
+	assert.Equal(t, "SSL", cluster.ConsumerProperties["security.protocol"], "security.protocol should be SSL")
+	assert.Equal(t, "SSL", cluster.AdminClientProperties["security.protocol"], "admin security.protocol should be SSL")
+}
+
+func TestExtractClusterConfig_TLSListenerWithoutCertificates(t *testing.T) {
+	// A TLS listener with name "tls" but no certificates field should still
+	// set security.protocol=SSL (the server may use a well-known CA).
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "secure-kafka",
+				"namespace": "ns",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "tls",
+						"type":             "internal",
+						"bootstrapServers": "secure-kafka-bootstrap:9093",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Empty(t, cluster.TLSCACert, "TLSCACert should be empty when no certificates present")
+	assert.Equal(t, "SSL", cluster.ConsumerProperties["security.protocol"], "TLS listener name should trigger SSL protocol")
+}
+
+func TestExtractClusterConfig_PlainListenerNoCertificates(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "kafka",
+				"namespace": "ns",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "plain",
+						"type":             "internal",
+						"bootstrapServers": "kafka-bootstrap:9092",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Empty(t, cluster.TLSCACert, "TLSCACert should be empty for plain listener")
+	assert.Empty(t, cluster.ConsumerProperties, "security.protocol should not be set for plain listener")
+	assert.Empty(t, cluster.AdminClientProperties, "admin security.protocol should not be set for plain listener")
+}
+
+func TestExtractClusterConfig_PlainPreferredOverTLSWithCerts(t *testing.T) {
+	// When both plain and tls listeners exist, plain wins by priority.
+	// TLS certificates from the tls listener should NOT be applied.
+	certPEM := "-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIUFakeTestCert=\n-----END CERTIFICATE-----\n"
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "kafka",
+				"namespace": "ns",
+			},
+			"status": map[string]interface{}{
+				"listeners": []interface{}{
+					map[string]interface{}{
+						"name":             "tls",
+						"type":             "internal",
+						"bootstrapServers": "kafka-bootstrap:9093",
+						"certificates":     []interface{}{certPEM},
+					},
+					map[string]interface{}{
+						"name":             "plain",
+						"type":             "internal",
+						"bootstrapServers": "kafka-bootstrap:9092",
+					},
+				},
+			},
+		},
+	}
+
+	cluster, err := extractClusterConfig(obj)
+	require.NoError(t, err)
+	assert.Equal(t, "kafka-bootstrap:9092", cluster.BootstrapBrokers, "plain listener should win")
+	assert.Empty(t, cluster.TLSCACert, "no TLS since plain listener won")
+	assert.Empty(t, cluster.ConsumerProperties, "no security.protocol since plain listener won")
+}
+
 func TestStrimziWatcher_Stop(t *testing.T) {
 	w, _ := newFakeWatcher(t)
 	w.Stop()
