@@ -71,6 +71,9 @@ sinks:
     ## Bind address for the Prometheus HTTP server. Empty string binds to all interfaces.
     ## Set to "127.0.0.1" to restrict to localhost only.
     bindAddress: ""
+    ## Maximum number of time series to track. 0 means unlimited.
+    ## Set a positive value to cap cardinality (e.g. 200000).
+    maxTimeSeries: 0
   graphite:
     ## Flag to enable the graphite metrics reporter
     enabled: false
