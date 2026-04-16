@@ -115,6 +115,7 @@ data:
       prometheus:
         enabled: {{ .Values.sinks.prometheus.enabled }}
         port: {{ .Values.sinks.prometheus.port }}
+        maxTimeSeries: {{ .Values.sinks.prometheus.maxTimeSeries }}
       graphite:
         enabled: {{ .Values.sinks.graphite.enabled }}
         {{- if .Values.sinks.graphite.enabled }}
