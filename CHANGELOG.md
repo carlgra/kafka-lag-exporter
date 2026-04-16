@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-04-16
+
+### Fixed
+- Prometheus sink `seriesCount` leak: the counter was incremented on every `Report()` call, not just when a new time series was created. After `maxTimeSeries/N` poll cycles, ALL metric updates silently stopped — freezing every metric (including `lag_seconds`) at its last value. Now tracks unique label combinations via a `knownSeries` set. This was the root cause of both the cardinality limit warnings (#38) and the constant `lag_seconds` graph (#39). ([#41](https://github.com/carlgra/kafka-lag-exporter/pull/41))
+- `kafka_consumergroup_group_lag_seconds` now reports `NaN` (metric not emitted) when the lookup table has too few points, instead of silently reporting `0`. Matches the documented behavior in the README. ([#41](https://github.com/carlgra/kafka-lag-exporter/pull/41))
+
+### Added
+- Strimzi autodiscovery now auto-configures TLS for TLS-only clusters. When the matched listener has a `certificates` field in the Strimzi CR status, the CA cert is extracted and used as the trust anchor automatically — no manual `consumerProperties`/`adminClientProperties` TLS config needed. Static cluster config with explicit TLS props still takes precedence. ([#42](https://github.com/carlgra/kafka-lag-exporter/pull/42), reported in [#32](https://github.com/carlgra/kafka-lag-exporter/issues/32))
+- Helm chart now exposes `sinks.prometheus.maxTimeSeries` in `values.yaml` (default `0` = unlimited). Previously hardcoded to `100000` with no chart-level override. ([#40](https://github.com/carlgra/kafka-lag-exporter/pull/40), reported in [#38](https://github.com/carlgra/kafka-lag-exporter/issues/38))
+
 ## [1.0.3] - 2026-04-14
 
 ### Fixed
