@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -759,6 +760,51 @@ func TestCollector_ReportClientMetrics_NoProvider(t *testing.T) {
 }
 
 // --- Negative lag clamping --------------------------------------------------
+
+// --- TooFewPoints / NaN lag seconds tests -----------------------------------
+
+func TestCollector_TooFewPoints_LagSecondsIsNaN(t *testing.T) {
+	// On the first poll cycle the lookup table has only one point, so Lookup
+	// returns Found=false (TooFewPoints). The collector should report NaN for
+	// lag_seconds so the Prometheus sink's NaN filter skips it.
+	tp := domain.TopicPartition{Topic: "t1", Partition: 0}
+	gtp := domain.GroupTopicPartition{
+		Group: "g1", Topic: "t1", Partition: 0,
+		MemberHost: "h1", ConsumerID: "c1", ClientID: "cl1",
+	}
+
+	mock := &mockClient{
+		groups: []string{"g1"},
+		gtps:   []domain.GroupTopicPartition{gtp},
+		groupOff: domain.GroupOffsets{
+			gtp: {Offset: 90, Timestamp: 1000},
+		},
+		earliestOff: domain.PartitionOffsets{tp: {Offset: 0, Timestamp: 1000}},
+		latestOff:   domain.PartitionOffsets{tp: {Offset: 100, Timestamp: 1000}},
+	}
+
+	rec := &recordingSink{}
+	c, err := NewCollector(
+		config.ClusterConfig{Name: "test"},
+		mock, []sink.Sink{rec},
+		func() lookup.LookupTable { return lookup.NewMemoryTable(60) },
+		10*time.Second, slog.Default(),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	c.Run(ctx)
+
+	// lag_seconds should be NaN (TooFewPoints on first cycle).
+	lagSec := rec.findMetric("kafka_consumergroup_group_lag_seconds")
+	require.NotNil(t, lagSec)
+	assert.True(t, math.IsNaN(lagSec.Value), "expected NaN for lag_seconds on first poll cycle, got %v", lagSec.Value)
+
+	// max_lag_seconds should NOT be reported when all partitions return NaN.
+	maxLagSec := rec.findMetric("kafka_consumergroup_group_max_lag_seconds")
+	assert.Nil(t, maxLagSec, "max_lag_seconds should not be reported when all partition lag_seconds are NaN")
+}
 
 func TestCollector_NegativeLagClampedToZero(t *testing.T) {
 	tp := domain.TopicPartition{Topic: "t1", Partition: 0}

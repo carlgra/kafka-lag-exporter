@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +51,8 @@ type PrometheusSink struct {
 	// Cardinality protection.
 	maxTimeSeries     int
 	seriesCount       atomic.Int64
+	knownSeries       map[string]struct{}
+	knownSeriesMu     sync.Mutex
 	droppedSeriesOnce sync.Once
 	droppedSeries     prometheus.Counter
 
@@ -143,6 +146,7 @@ func NewPrometheusSink(port int, bindAddress string, maxTimeSeries int, filter *
 		filter:            filter,
 		logger:            logger,
 		maxTimeSeries:     maxTimeSeries,
+		knownSeries:       make(map[string]struct{}),
 		pollsTotal:        pollsTotal,
 		pollErrors:        pollErrors,
 		pollDuration:      pollDuration,
@@ -242,23 +246,34 @@ func (s *PrometheusSink) Report(_ context.Context, m metrics.MetricValue) {
 		return
 	}
 
-	// Cardinality protection: skip new series if limit exceeded.
-	if s.maxTimeSeries > 0 && s.seriesCount.Load() >= int64(s.maxTimeSeries) {
-		s.droppedSeries.Inc()
-		s.droppedSeriesOnce.Do(func() {
-			s.logger.Warn("cardinality limit reached, dropping new series", "limit", s.maxTimeSeries)
-		})
-		return
-	}
-
 	labelValues := labelsToValues(m.Definition.Labels, m.Labels)
+
+	// Build a series key from metric name + label values to track unique time series.
+	seriesKey := m.Definition.Name + "\x00" + strings.Join(labelValues, "\x00")
+
+	s.knownSeriesMu.Lock()
+	_, known := s.knownSeries[seriesKey]
+	if !known {
+		// Cardinality protection: skip new series if limit exceeded.
+		if s.maxTimeSeries > 0 && s.seriesCount.Load() >= int64(s.maxTimeSeries) {
+			s.knownSeriesMu.Unlock()
+			s.droppedSeries.Inc()
+			s.droppedSeriesOnce.Do(func() {
+				s.logger.Warn("cardinality limit reached, dropping new series", "limit", s.maxTimeSeries)
+			})
+			return
+		}
+		s.knownSeries[seriesKey] = struct{}{}
+		s.seriesCount.Add(1)
+	}
+	s.knownSeriesMu.Unlock()
+
 	gauge, err := gv.GetMetricWithLabelValues(labelValues...)
 	if err != nil {
 		s.logger.Warn("failed to get metric", "metric", m.Definition.Name, "error", err)
 		return
 	}
 	gauge.Set(m.Value)
-	s.seriesCount.Add(1)
 }
 
 func (s *PrometheusSink) Remove(_ context.Context, m metrics.RemoveMetric) {
@@ -268,6 +283,24 @@ func (s *PrometheusSink) Remove(_ context.Context, m metrics.RemoveMetric) {
 	}
 	labelValues := labelsToValues(m.Definition.Labels, m.Labels)
 	gv.DeleteLabelValues(labelValues...)
+
+	// Remove from known series tracking so seriesCount stays accurate.
+	seriesKey := m.Definition.Name + "\x00" + strings.Join(labelValues, "\x00")
+	s.knownSeriesMu.Lock()
+	if _, known := s.knownSeries[seriesKey]; known {
+		delete(s.knownSeries, seriesKey)
+		s.seriesCount.Add(-1)
+	}
+	s.knownSeriesMu.Unlock()
+}
+
+// ResetSeriesCount clears the known series tracking. Call at the start of each
+// poll cycle so the count reflects only currently-active series.
+func (s *PrometheusSink) ResetSeriesCount() {
+	s.knownSeriesMu.Lock()
+	s.knownSeries = make(map[string]struct{})
+	s.seriesCount.Store(0)
+	s.knownSeriesMu.Unlock()
 }
 
 // labelsToValues converts a label map to an ordered slice matching the definition's label order.
