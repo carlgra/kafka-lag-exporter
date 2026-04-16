@@ -424,7 +424,10 @@ func (c *Collector) computeMetrics(snapshot *OffsetsSnapshot) []metrics.MetricVa
 		})
 
 		// Compute time lag via lookup table.
-		var lagSeconds float64
+		// Default to NaN so that when the lookup has too few points (e.g. first
+		// poll cycle) we don't report a misleading zero. The sink's NaN filter
+		// will skip reporting this metric until a real value is available.
+		lagSeconds := math.NaN()
 		if table, ok := c.lookupTables[tp]; ok {
 			lookupResult := table.Lookup(groupOffset.Offset)
 			if lookupResult.Found {

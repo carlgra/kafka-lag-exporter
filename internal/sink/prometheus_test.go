@@ -311,19 +311,26 @@ func TestPrometheusSink_ReportClientMetrics(t *testing.T) {
 func TestPrometheusSink_CardinalityLimit(t *testing.T) {
 	port := getFreePort()
 	filter, _ := NewMetricFilter([]string{".*"})
-	sink, err := NewPrometheusSink(port, "", 100000, filter, slog.Default())
+	sink, err := NewPrometheusSink(port, "", 5, filter, slog.Default())
 	require.NoError(t, err)
 	defer sink.Stop()
 	time.Sleep(100 * time.Millisecond)
 
-	// Set a low cardinality limit for testing.
-	sink.maxTimeSeries = 5
-	sink.seriesCount.Store(5) // Already at the limit.
-
 	ctx := context.Background()
+
+	// Fill up to the limit with 5 unique series.
+	for i := range 5 {
+		sink.Report(ctx, metrics.MetricValue{
+			Definition: metrics.PartitionLatestOffset,
+			Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": fmt.Sprintf("%d", i)},
+			Value:      float64(i * 10),
+		})
+	}
+
+	// This 6th unique series should be dropped.
 	sink.Report(ctx, metrics.MetricValue{
 		Definition: metrics.PartitionLatestOffset,
-		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "99"},
 		Value:      100,
 	})
 
@@ -333,10 +340,129 @@ func TestPrometheusSink_CardinalityLimit(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	bodyStr := string(body)
 
-	// The metric should have been dropped.
-	assert.False(t, strings.Contains(bodyStr, `kafka_partition_latest_offset{`))
+	// The 6th series should have been dropped.
+	assert.False(t, strings.Contains(bodyStr, `partition="99"`))
 	// The dropped counter should be incremented.
 	assert.Contains(t, bodyStr, "kafka_lag_exporter_dropped_series_total 1")
+}
+
+func TestPrometheusSink_SeriesCountTracksUniqueSeries(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", 0, filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+
+	ctx := context.Background()
+
+	// Report 3 unique series for 100 cycles each.
+	for cycle := range 100 {
+		for i := range 3 {
+			sink.Report(ctx, metrics.MetricValue{
+				Definition: metrics.PartitionLatestOffset,
+				Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": fmt.Sprintf("%d", i)},
+				Value:      float64(cycle*10 + i),
+			})
+		}
+	}
+
+	// seriesCount should be 3, not 300.
+	assert.Equal(t, int64(3), sink.seriesCount.Load())
+}
+
+func TestPrometheusSink_MaxTimeSeriesLimitsUniqueSeries(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", 3, filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	ctx := context.Background()
+
+	// Report 3 unique series (fills the limit).
+	for i := range 3 {
+		sink.Report(ctx, metrics.MetricValue{
+			Definition: metrics.PartitionLatestOffset,
+			Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": fmt.Sprintf("%d", i)},
+			Value:      float64(i),
+		})
+	}
+
+	// Updating existing series should still work.
+	sink.Report(ctx, metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+		Value:      999,
+	})
+
+	// New (4th) series should be dropped.
+	sink.Report(ctx, metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "new"},
+		Value:      42,
+	})
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// Existing series updated.
+	assert.Contains(t, bodyStr, "999")
+	// New series dropped.
+	assert.False(t, strings.Contains(bodyStr, `partition="new"`))
+	// Series count is still 3.
+	assert.Equal(t, int64(3), sink.seriesCount.Load())
+}
+
+func TestPrometheusSink_ExistingSeriesContinueAfterLimit(t *testing.T) {
+	port := getFreePort()
+	filter, _ := NewMetricFilter([]string{".*"})
+	sink, err := NewPrometheusSink(port, "", 2, filter, slog.Default())
+	require.NoError(t, err)
+	defer sink.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	ctx := context.Background()
+
+	// Establish 2 series.
+	sink.Report(ctx, metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+		Value:      10,
+	})
+	sink.Report(ctx, metrics.MetricValue{
+		Definition: metrics.PartitionLatestOffset,
+		Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "1"},
+		Value:      20,
+	})
+
+	// Simulate many poll cycles updating the same 2 series.
+	for cycle := 1; cycle <= 50; cycle++ {
+		sink.Report(ctx, metrics.MetricValue{
+			Definition: metrics.PartitionLatestOffset,
+			Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "0"},
+			Value:      float64(10 + cycle),
+		})
+		sink.Report(ctx, metrics.MetricValue{
+			Definition: metrics.PartitionLatestOffset,
+			Labels:     map[string]string{"cluster_name": "c", "topic": "t", "partition": "1"},
+			Value:      float64(20 + cycle),
+		})
+	}
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// Both series should have the latest values (not frozen).
+	assert.Contains(t, bodyStr, "60") // 10 + 50
+	assert.Contains(t, bodyStr, "70") // 20 + 50
+	assert.Equal(t, int64(2), sink.seriesCount.Load())
 }
 
 func TestPrometheusSink_ReadyEndpoint_NoCheck(t *testing.T) {
